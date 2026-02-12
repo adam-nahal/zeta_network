@@ -10,3 +10,6 @@ path = "src/server.rs"
 [[bin]]
 name = "client"
 path = "src/client.rs"
+
+[dependencies]
+tokio = { version = "1.49.0", features = ["full"] }

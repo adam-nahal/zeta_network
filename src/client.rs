@@ -8,9 +8,9 @@ fn main() {
     let socket_relay = format!("{}:{}", ip_relay, port_relay);
 
     let mut stream = TcpStream::connect(&socket_relay)
-        .expect("[ERROR] Impossible de se connecter au relay");
+        .expect("[ERROR] Can't connect to relay");
     
-    println!("\nConnecté au relai ({}). Tapez vos messages (Ctrl+C pour quitter):", socket_relay);
+    println!("\nConnected to relay ({}). Enter messages (Ctrl+C to quit):", socket_relay);
     
     // Boucle d'envoi de mesage au relai
     let stdin = io::stdin();
