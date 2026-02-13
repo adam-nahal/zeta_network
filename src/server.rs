@@ -32,7 +32,7 @@ async fn main() {
 	        is_ipv6: addr_client.is_ipv6()
 	    };
 	    connected_clients.push(client);
-	    println!("New client connect as {}:{}", connected_clients.ip, connected_clients.port);
+	    println!("New client connect as {}:{}", connected_clients[0].ip, connected_clients[0].port);
 
         tokio::spawn(async move {
             let mut buffer = [0; 512];
