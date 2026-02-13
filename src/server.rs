@@ -21,7 +21,7 @@ async fn main() {
     let socket_relay = SocketAddr::new(IpAddr::from([0, 0, 0, 0]), port_relay);
     
     let listener = TcpListener::bind(&socket_relay).await.unwrap();
-    println!("Listening on port {}...", port_relay);
+    println!("Listening on  {}...", socket_relay);
     
     // Crée la liste de tous les clients connectés à ce relai
     let connected_peers: PeersMap = Arc::new(Mutex::new(HashMap::new()));
