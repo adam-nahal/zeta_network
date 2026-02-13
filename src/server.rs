@@ -1,10 +1,10 @@
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, tcp::{OwnedReadHalf, OwnedWriteHalf}};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::net::{SocketAddr, IpAddr};
-type PeersMap = Arc<Mutex<HashMap<SocketAddr, tokio::net::TcpStream>>>;  // Raccourci
+type PeersMap = Arc<Mutex<HashMap<SocketAddr, OwnedWriteHalf>>>;  // Le relai n'a pas besoin de OwnedReadHalf pour écouter les messages de SocketAddr, il a juste besoin d'écouter au port d'écoute.
 
 
 #[tokio::main]
@@ -23,42 +23,36 @@ async fn main() {
         let (new_peer_socket, new_peer_address) = listener.accept().await.unwrap();  // En arrière plan avec .await()
 	    println!("New peer connected as {}", new_peer_address);
 
+	    // Séparation du flux de lecture et d'écriture
+        let (reader, writer) = new_peer_socket.into_split();
+
         // Ajout du nouveau client dans le repertoire
 		let connected_peers_clone = Arc::clone(&connected_peers);
-		connected_peers_clone.lock().await.insert(new_peer_address, new_peer_socket);
+		connected_peers_clone.lock().await.insert(new_peer_address, writer);
 
 	    // Écoute des messages recus depuis ce nouveau peer connecté, et broadcast 
-	    tokio::spawn(handle_peer_connection(connected_peers_clone, new_peer_address));
+	    tokio::spawn(handle_peer_connection(connected_peers_clone, new_peer_address, reader));
     }
 }
 
-async fn handle_peer_connection(peers_ref: PeersMap, current_peer_address: SocketAddr) {
+async fn handle_peer_connection(peers_ref: PeersMap, current_peer_address: SocketAddr,  mut reader: OwnedReadHalf) {
     let mut buffer = [0; 512];  // Pour stocker les message que ce nouveau peer envoie au relai
     
     loop {
-        let mut peers_map = peers_ref.lock().await;
-        let socket = match peers_map.get_mut(&current_peer_address) {
-            Some(s) => s,
-            None => break,
-        };
-        
-        match socket.read(&mut buffer).await {
-            Ok(0) => {  // Ce peer est déconnecté du relai
-                drop(peers_map);
-                peers_ref.lock().await.remove(&current_peer_address);  // Suppression de la liste des peers connectés
+    	match reader.read(&mut buffer).await {
+    	    Ok(0) => {
+                peers_ref.lock().await.remove(&current_peer_address);
                 println!("❌ Peer disconnected: {}", current_peer_address);
                 break;
             }
-            Ok(n) => {  // Ce peer a envoyé un message au relai
+            Ok(n) => {
                 let message = String::from_utf8_lossy(&buffer[..n]).trim().to_string();
                 println!("📨 Message from {}: {}", current_peer_address, message);
                 
-                drop(peers_map);
                 relay_message(&peers_ref, current_peer_address, &message).await;
             }
             Err(e) => {
-                println!("⚠️  Error: {}", e);
-                drop(peers_map);
+                println!("⚠️  Error reading from {}: {}", current_peer_address, e);
                 peers_ref.lock().await.remove(&current_peer_address);
                 break;
             }
