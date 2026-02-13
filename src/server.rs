@@ -1,6 +1,13 @@
 use tokio::net::TcpListener;
 use tokio::io::AsyncReadExt;
 
+struct client {
+	ip: String,
+	port: u16,
+	is_ipv4: bool,
+	is_ipv6: bool
+}
+
 #[tokio::main]
 async fn main() {
     // Le relay démarre l'écoute 
@@ -16,16 +23,8 @@ async fn main() {
         println!("\n========== CLIENT CONNECTÉ ==========");
         println!("IP: {}", addr_client.ip());
         println!("Port: {}", addr_client.port());
-        println!("Adresse: {}", addr_client);
         println!("IPv4: {}", addr_client.is_ipv4());
         println!("IPv6: {}", addr_client.is_ipv6());
-        
-        println!("\n===== SOCKET =====");
-        println!("Local addr: {:?}", socket_client.local_addr());
-        println!("Peer addr: {:?}", socket_client.peer_addr());
-        println!("TTL: {:?}", socket_client.ttl());
-        println!("Nodelay: {:?}", socket_client.nodelay());
-        println!("==================================\n");
 
         tokio::spawn(async move {
             let mut buffer = [0; 512];

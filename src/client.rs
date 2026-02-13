@@ -1,18 +1,31 @@
 use std::io::{self, Write};
-use std::net::TcpStream;
+use tokio::net::TcpStream;
+use tokio::io::AsyncReadExt;
 
-fn main() {
-    // Connexion au relai
+#[tokio::main]
+async fn main() {
+	// Connexion au relai
     let ip_relay = "65.75.200.180";
     let port_relay = 12345;
     let socket_relay = format!("{}:{}", ip_relay, port_relay);
-
-    let mut stream = TcpStream::connect(&socket_relay)
+    let mut stream = TcpStream::connect(&socket_relay).await
         .expect("[ERROR] Can't connect to relay");
     
     println!("\nConnected to relay ({}). Enter messages (Ctrl+C to quit):", socket_relay);
     
-    // Boucle d'envoi de mesage au relai
+    // Séparation du flux de données pour l'envoie et la réception
+    let (mut reader, mut writer) = stream.into_split();
+    
+    // Construction du thread d'écoute
+    tokio::spawn(async move {
+        let mut buf = [0; 1024];
+        while let Ok(n) = reader.read(&mut buf).await {
+            if n == 0 { break; }
+            println!("\n[RECEIVED] {}", String::from_utf8_lossy(&buf[..n]));
+        }
+    });
+    
+    
     let stdin = io::stdin();
     loop {
         print!("> ");
@@ -21,7 +34,6 @@ fn main() {
         let mut input = String::new();
         stdin.read_line(&mut input).unwrap();
         
-        // Envoyer
-        stream.write_all(input.as_bytes()).unwrap();
+        writer.write_all(input.as_bytes()).await.unwrap();
     }
 }
