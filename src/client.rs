@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 use tokio::net::TcpStream;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::main]
 async fn main() {
@@ -8,7 +8,7 @@ async fn main() {
     let ip_relay = "65.75.200.180";
     let port_relay = 12345;
     let socket_relay = format!("{}:{}", ip_relay, port_relay);
-    let mut stream = TcpStream::connect(&socket_relay).await
+    let stream = TcpStream::connect(&socket_relay).await
         .expect("[ERROR] Can't connect to relay");
     
     println!("\nConnected to relay ({}). Enter messages (Ctrl+C to quit):", socket_relay);
@@ -25,7 +25,7 @@ async fn main() {
         }
     });
     
-    
+
     let stdin = io::stdin();
     loop {
         print!("> ");
