@@ -1,7 +1,7 @@
 use tokio::net::TcpListener;
 use tokio::io::AsyncReadExt;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 struct Client {
 	ip: String,
 	port: u16,
@@ -32,7 +32,7 @@ async fn main() {
 	        is_ipv6: addr_client.is_ipv6()
 	    };
 	    connected_clients.push(client);
-	    println!("New client connect as {:?}", connected_clients);
+	    println!("New client connect as {}:{}", connected_clients.ip, connected_clients.port);
 
         tokio::spawn(async move {
             let mut buffer = [0; 512];
