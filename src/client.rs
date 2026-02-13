@@ -11,12 +11,12 @@ async fn main() {
     let stream = TcpStream::connect(&socket_relay).await
         .expect("[ERROR] Can't connect to relay");
     
-    println!("\nConnected to relay ({}). Enter messages (Ctrl+C to quit):", socket_relay);
+    println!("\nConnected to relay {}. Enter messages (Ctrl+C to quit):", socket_relay);
     
     // Séparation du flux de données pour l'envoie et la réception
     let (mut reader, mut writer) = stream.into_split();
     
-    // Construction du thread d'écoute
+    // Construction du thread d'écoute (tourne en parallele)
     tokio::spawn(async move {
         let mut buf = [0; 1024];
         while let Ok(n) = reader.read(&mut buf).await {
