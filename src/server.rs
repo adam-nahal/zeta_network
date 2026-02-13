@@ -1,7 +1,8 @@
 use tokio::net::TcpListener;
 use tokio::io::AsyncReadExt;
 
-struct client {
+#[derive(Clone, Debug)]
+struct Client {
 	ip: String,
 	port: u16,
 	is_ipv4: bool,
@@ -17,14 +18,21 @@ async fn main() {
     let listener = TcpListener::bind(&listen_socket_relay).await.unwrap();
     println!("Listening on port {}...", listen_port_relay);
     
+    // Crée la liste de tous les clients connectés à ce relai
+    let mut connected_clients: Vec<Client> = Vec::new();
+
     loop {
         let (mut socket_client, addr_client) = listener.accept().await.unwrap();  // En arrière plan avec .await()
-                // TOUTES les infos du client
-        println!("\n========== CLIENT CONNECTÉ ==========");
-        println!("IP: {}", addr_client.ip());
-        println!("Port: {}", addr_client.port());
-        println!("IPv4: {}", addr_client.is_ipv4());
-        println!("IPv6: {}", addr_client.is_ipv6());
+
+        // Ajout du nouveau client dans le repertoire
+        let client = Client {
+	        ip: addr_client.ip().to_string(),
+	        port: addr_client.port(),
+	        is_ipv4: addr_client.is_ipv4(),
+	        is_ipv6: addr_client.is_ipv6()
+	    };
+	    connected_clients.push(client);
+	    println!("New client connect as {:?}", connected_clients);
 
         tokio::spawn(async move {
             let mut buffer = [0; 512];
