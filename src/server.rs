@@ -11,8 +11,22 @@ async fn main() {
     println!("Listening on port {}...", listen_port_relay);
     
     loop {
-        let (mut socket_client, _) = listener.accept().await.unwrap();  // En arrière plan avec .await()
+        let (mut socket_client, addr_client) = listener.accept().await.unwrap();  // En arrière plan avec .await()
+                // TOUTES les infos du client
+        println!("\n========== CLIENT CONNECTÉ ==========");
+        println!("IP: {}", addr_client.ip());
+        println!("Port: {}", addr_client.port());
+        println!("Adresse: {}", addr_client);
+        println!("IPv4: {}", addr_client.is_ipv4());
+        println!("IPv6: {}", addr_client.is_ipv6());
         
+        println!("\n===== SOCKET =====");
+        println!("Local addr: {:?}", socket_client.local_addr());
+        println!("Peer addr: {:?}", socket_client.peer_addr());
+        println!("TTL: {:?}", socket_client.ttl());
+        println!("Nodelay: {:?}", socket_client.nodelay());
+        println!("==================================\n");
+
         tokio::spawn(async move {
             let mut buffer = [0; 512];
             
