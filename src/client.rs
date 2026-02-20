@@ -37,6 +37,6 @@ async fn main() {
         // On enlève les espaces et sauts de ligne invisibles à la fin
 		let message = input.trim_end();
         
-        writer.write_all(input.as_bytes()).await.unwrap();
+        writer.write_all(message.as_bytes()).await.unwrap();
     }
 }
