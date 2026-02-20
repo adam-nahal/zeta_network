@@ -21,7 +21,7 @@ async fn main() {
         let mut buf = [0; 1024];
         while let Ok(n) = reader.read(&mut buf).await {
             if n == 0 { break; }
-            println!("\n[RECEIVED] {} \n> ", String::from_utf8_lossy(&buf[..n]));
+            print!("\n[RECEIVED] {} \n> ", String::from_utf8_lossy(&buf[..n]));
         }
     });
     
@@ -33,6 +33,9 @@ async fn main() {
         
         let mut input = String::new();
         stdin.read_line(&mut input).unwrap();
+
+        // On enlève les espaces et sauts de ligne invisibles à la fin
+		let message = input.trim_end();
         
         writer.write_all(input.as_bytes()).await.unwrap();
     }
