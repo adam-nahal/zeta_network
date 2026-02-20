@@ -22,6 +22,7 @@ async fn main() {
         while let Ok(n) = reader.read(&mut buf).await {
             if n == 0 { break; }
             print!("\n[RECEIVED] {} \n> ", String::from_utf8_lossy(&buf[..n]));
+            io::stdout().flush().unwrap();
         }
     });
     
