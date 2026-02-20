@@ -5,7 +5,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 #[tokio::main]
 async fn main() {
 	// Connexion au relai
-    let ip_relay = "65.75.200.180";
+    let ip_relay = "65.75.201.11";
     let port_relay = 12345;
     let socket_relay = format!("{}:{}", ip_relay, port_relay);
     let stream = TcpStream::connect(&socket_relay).await
@@ -21,7 +21,7 @@ async fn main() {
         let mut buf = [0; 1024];
         while let Ok(n) = reader.read(&mut buf).await {
             if n == 0 { break; }
-            println!("\n[RECEIVED] {}", String::from_utf8_lossy(&buf[..n]));
+            println!("\n[RECEIVED] {} \n> ", String::from_utf8_lossy(&buf[..n]));
         }
     });
     

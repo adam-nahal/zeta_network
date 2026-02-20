@@ -12,9 +12,10 @@ async fn main() {
     // Le relay démarre l'écoute 
     let port_relay = 12345;
     let socket_relay = SocketAddr::new(IpAddr::from([0, 0, 0, 0]), port_relay);
-    
+    let ip_relay = get_public_ip().await.expect("Public IP of the relay not obtained.");
+
     let listener = TcpListener::bind(&socket_relay).await.unwrap();
-    println!("Listening on port {}...", port_relay);
+    println!("Listening on {}:{}...", ip_relay, port_relay);
     
     // Crée la liste de tous les clients connectés à ce relai
     let connected_peers: PeersMap = Arc::new(Mutex::new(HashMap::new()));
@@ -72,4 +73,10 @@ async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, message: &str)
             }
         }
     }
+}
+
+async fn get_public_ip() -> Result<String, reqwest::Error> {
+    let resp = reqwest::get("https://api.ipify.org").await?;
+    let ip = resp.text().await?;
+    Ok(ip)
 }

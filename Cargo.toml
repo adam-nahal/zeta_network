@@ -12,4 +12,5 @@ name = "client"
 path = "src/client.rs"
 
 [dependencies]
+reqwest = "0.13.2"
 tokio = { version = "1.49.0", features = ["full"] }
