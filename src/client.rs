@@ -15,18 +15,18 @@ async fn main() {
     
     // Séparation du flux de données pour l'envoie et la réception
     let (mut reader, mut writer) = stream.into_split();
-    
+
     // Construction du thread d'écoute (tourne en parallele)
     tokio::spawn(async move {
         let mut buf = [0; 1024];
         while let Ok(n) = reader.read(&mut buf).await {
             if n == 0 { break; }
-            print!("\n[RECEIVED] {} \n> ", String::from_utf8_lossy(&buf[..n]));
+            print!("\n[RECEIVED] {} \n> ", String::from_utf8_lossy(&buf[..n]).trim());
             io::stdout().flush().unwrap();
         }
     });
     
-
+    // Gestion du flux d'écriture (envoi de messages)
     let stdin = io::stdin();
     loop {
         print!("> ");
@@ -36,8 +36,9 @@ async fn main() {
         stdin.read_line(&mut input).unwrap();
 
         // On enlève les espaces et sauts de ligne invisibles à la fin
-		let message = input.trim_end();
-        
+		let message = input.trim();
+
+		// Envoi du message
         writer.write_all(message.as_bytes()).await.unwrap();
     }
 }
