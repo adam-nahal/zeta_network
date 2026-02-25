@@ -17,6 +17,8 @@ struct Opts {
     // L'adresse ip du noeud auquel l' (dial) veut se connecter
     #[arg(long, required_if_eq("mode", "dial"), help("Peers in dial mode require '--remote-peer-ip'"))]
     remote_peer_ip: Option<String>,
+    #[arg(long, required_if_eq("mode", "dial"), help("Peers in dial mode require '--remote-peer-port'"))]
+    remote_peer_port: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, ValueEnum)]

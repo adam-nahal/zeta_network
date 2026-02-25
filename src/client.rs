@@ -29,7 +29,7 @@ pub async fn main_client(opts: Opts) {
 
     // Récupère l'adresse locale de cette connexion (pour connaître notre port)
     let local_addr = relay_stream.local_addr().unwrap();
-    println!("Our local address: {}", local_addr);
+    println!("\n\n## Let's create direct connection with others peer ##\nOur local address: {}", local_addr);
 
     match opts.mode {
         Mode::Listen => {
@@ -37,35 +37,44 @@ pub async fn main_client(opts: Opts) {
         }
         Mode::Dial => {
             let remote_peer_ip = opts.remote_peer_ip.expect("--remote-peer-ip requis");
-            dial_mode(&mut relay_stream, local_addr, &remote_peer_ip).await;
+            let remote_peer_port = opts.remote_peer_port.expect("--remote-peer-port requis");
+            dial_mode(&mut relay_stream, local_addr, &remote_peer_ip, &remote_peer_port).await;
         }
         _ => unreachable!()
     }
 }
 
 // ==================== MODE LISTEN ====================
-async fn listen_mode(relay_stream: &mut TcpStream, local_addr: SocketAddr) {
-    println!("\nLISTEN MODE: Waiting for dial peer...");
-    
+async fn listen_mode(relay_stream: &mut TcpStream, local_addr: SocketAddr) {    
     // Étape 1 : Annoncer au relai qu'on est prêt à recevoir
     let msg = format!("LISTEN_READY\n");
     relay_stream.write_all(msg.as_bytes()).await.unwrap();
     println!("Sent 'LISTEN_READY' to relay");
     
     // Étape 2 : Recevoir l'adresse du peer Dial via le relai
+    println!("Waiting for dial peer... (LISTEN MODE)");
+    let dial_peer_addr:SocketAddr;
     let mut buf = [0u8; 512];
-    let n = relay_stream.read(&mut buf).await.unwrap();
-    let response = String::from_utf8_lossy(&buf[..n]);
+
+    loop {
+	    let n = relay_stream.read(&mut buf).await.unwrap();
+	    let response = String::from_utf8_lossy(&buf[..n]);
+	
+	    if let Some(addr_str) = response
+		    .trim()
+		    .split('[')
+		    .nth(1)
+		    .and_then(|s| s.split(']').next())
+	    {
+	        if let Ok(addr) = addr_str.parse::<SocketAddr>() {
+	            dial_peer_addr = addr;
+	        	println!("Received one dial peer address: {}", dial_peer_addr);
+	            break;
+	        }
+    	}
+	}
     
-    let dial_peer_addr: SocketAddr = response.trim()
-        .strip_prefix("DIAL_PEER:")
-        .expect("Invalid response format")
-        .parse()
-        .expect("Invalid peer address");
-    
-    println!("Received dial peer address: {}", dial_peer_addr);
-    
-    // Étape 3 : TEST 1 - Connexion directe AVANT hole punching
+    // Étape 3 : Connexion directe AVANT hole punching
     if test_direct_connection(&dial_peer_addr).await {
         println!("Direct connection works WITHOUT hole punching.");
         return;
@@ -100,8 +109,8 @@ async fn listen_mode(relay_stream: &mut TcpStream, local_addr: SocketAddr) {
 }
 
 // ==================== MODE DIAL ====================
-async fn dial_mode(relay_stream: &mut TcpStream, local_addr: SocketAddr, remote_peer_ip: &str) {
-    println!("\nDIAL MODE: Initiating connection to {}...", remote_peer_ip);
+async fn dial_mode(relay_stream: &mut TcpStream, local_addr: SocketAddr, remote_peer_ip: &str, remote_peer_port: &str) {
+    println!("\nDIAL MODE: Initiating connection to {}:{}...", remote_peer_ip, remote_peer_port);
     
     // Étape 1 : Demander au relai de nous connecter au peer Listen
     let msg = format!("DIAL_REQUEST:{}\n", remote_peer_ip);
