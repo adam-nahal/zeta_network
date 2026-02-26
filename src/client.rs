@@ -1,4 +1,4 @@
-use tokio::net::{TcpStream, TcpListener, UdpSocket};
+use tokio::net::{TcpStream, TcpListener, UdpSocket, TcpSocket};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{sleep, Duration, timeout};
 use std::net::SocketAddr;
@@ -78,11 +78,24 @@ async fn listen_mode(relay_stream: &mut TcpStream, local_addr: SocketAddr) {
     println!("Sent 'LISTEN_READY:{}' to relay", dial_peer_addr);
     
     // Étape 3 : Test de connexion directe (avant hole punching)
-    let listener = TcpListener::bind(local_addr).await.unwrap();
-    println!("Listening...");
+    // let listener = TcpListener::bind(local_addr).await.unwrap();
+    // println!("Listening...");
 
-    let (_, new_peer_address) = listener.accept().await.unwrap();
-	println!("New peer connected as {}", new_peer_address);
+    // let (_, new_peer_address) = listener.accept().await.unwrap();
+	// println!("New peer connected as {}", new_peer_address);
+
+	let socket = TcpSocket::new_v4().unwrap();
+	socket.set_reuseaddr(true).unwrap();
+	socket.bind(local_addr).unwrap();
+	let listener = socket.listen(1).unwrap();
+
+	match timeout(Duration::from_secs(5), listener.accept()).await {
+	    Ok(Ok((stream, addr))) => {
+	        println!("✓ Direct connection from {}", addr);
+	        return;
+	    }
+	    _ => println!("Direct connection failed, starting hole punching...")
+	}
 
     // Étape 4 : Hole Punching - Écoute + envoi simultané    
     let listener = TcpListener::bind(local_addr).await  // Bind sur le même port local qu'on utilise avec le relai
@@ -149,16 +162,14 @@ async fn dial_mode(relay_stream: &mut TcpStream, local_addr: SocketAddr, remote_
 
     // Étape 3 : TEST 1 - Connexion directe AVANT hole punching
     sleep(Duration::from_secs(3)).await;
-    println!("direct connection");
-	match TcpStream::connect(listen_peer_addr).await {
-	    Ok(stream) => {
-	        println!("✓ Direct connection from dial to listen {}", listen_peer_addr);
+    match timeout(Duration::from_secs(5), TcpStream::connect(listen_peer_addr)).await {
+	    Ok(Ok(stream)) => {
+	        println!("✓ Direct connection to {}", listen_peer_addr);
 	        return;
 	    }
 	    _ => println!("Direct connection failed, starting hole punching...")
 	}
-    
-    
+	    
     // Étape 4 : Hole Punching - Envoi simultané
     println!("\n🔨 Starting HOLE PUNCHING...");
     
