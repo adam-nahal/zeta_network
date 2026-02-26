@@ -151,7 +151,7 @@ async fn dial_mode(relay_stream: &mut TcpStream, local_addr: SocketAddr, remote_
 	};
 
     // Étape 3 : TEST 1 - Connexion directe AVANT hole punching
-    let listener = TcpListener::bind(listen_peer_addr).await.unwrap();
+    let listener = TcpListener::bind(local_addr).await.unwrap();
     println!("Listening on {}...", listen_peer_addr);
 
     let (_, new_peer_address) = listener.accept().await.unwrap();
