@@ -149,6 +149,7 @@ async fn dial_mode(relay_stream: &mut TcpStream, local_addr: SocketAddr, remote_
 
     // Étape 3 : TEST 1 - Connexion directe AVANT hole punching
     sleep(Duration::from_secs(3)).await;
+    println!("direct connection");
 	match TcpStream::connect(listen_peer_addr).await {
 	    Ok(stream) => {
 	        println!("✓ Direct connection from dial to listen {}", listen_peer_addr);
