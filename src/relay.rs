@@ -10,8 +10,8 @@ type PeersMap = Arc<Mutex<HashMap<SocketAddr, OwnedWriteHalf>>>;  // Le relai n'
 pub async fn main_relay() {
     // Le relay démarre l'écoute 
     let port_relay = 12345;
-    let socket_relay = SocketAddr::new(IpAddr::from([0, 0, 0, 0]), port_relay);
     let ip_relay = get_public_ip().await.expect("Public IP of the relay not obtained.");
+    let socket_relay = SocketAddr::new(ip_relay, port_relay);
 
     let listener = TcpListener::bind(&socket_relay).await.unwrap();
     println!("Listening on {}:{}...", ip_relay, port_relay);

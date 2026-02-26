@@ -78,7 +78,8 @@ async fn listen_mode(relay_stream: &mut TcpStream, local_addr: SocketAddr) {
     println!("Sent 'LISTEN_READY:{}' to relay", dial_peer_addr);
     
     // Étape 3 : Test de connexion directe (avant hole punching)
-	match timeout(Duration::from_secs(3), TcpStream::connect(dial_peer_addr)).await {
+    Duration::from_secs(5)
+	match TcpStream::connect(dial_peer_addr).await {
 	    Ok(Ok(stream)) => {
 	        println!("✓ Direct connection to dial {}", dial_peer_addr);
 	        return;
@@ -150,13 +151,11 @@ async fn dial_mode(relay_stream: &mut TcpStream, local_addr: SocketAddr, remote_
 	};
 
     // Étape 3 : TEST 1 - Connexion directe AVANT hole punching
-	match timeout(Duration::from_secs(3), TcpStream::connect(listen_peer_addr)).await {
-	    Ok(Ok(stream)) => {
-	        println!("✓ Direct connection to listen {}", listen_peer_addr);
-	        return;
-	    }
-	    _ => println!("Direct connection failed, starting hole punching...")
-	}
+    let listener = TcpListener::bind(listen_peer_addr).await.unwrap();
+    println!("Listening on {}...", listen_peer_addr);
+
+    let (_, new_peer_address) = listener.accept().await.unwrap();
+	println!("New peer connected as {}", new_peer_address);
     
     // Étape 4 : Hole Punching - Envoi simultané
     println!("\n🔨 Starting HOLE PUNCHING...");
