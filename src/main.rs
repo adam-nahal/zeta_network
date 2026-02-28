@@ -1,6 +1,7 @@
 use clap::{Parser, ValueEnum};
 mod relay;
 mod client;
+mod nat_detector;
 
 #[derive(Debug, Parser, Clone)]
 struct Opts {

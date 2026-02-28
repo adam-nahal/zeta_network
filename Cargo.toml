@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.5.59", features = ["derive"] }
 io = "0.0.2"
+nat-detect = "0.1.7"
 reqwest = { version = "0.13.2", default-features = false, features = ["default-tls"] }
 stun = "0.17.1"
 stun-client = "0.1.4"
@@ -13,3 +14,8 @@ stun-rs = "0.1.11"
 stun_codec = "0.4.0"
 stunclient = "0.4.2"
 tokio = { version = "1.49.0", features = ["full"] }
+stun_codec_blazh= {version="0.1.13"}
+log = "0.4"
+simple_logger = "2.1"
+rand = "0.8.5"
+bytecodec = "0.4.15"
