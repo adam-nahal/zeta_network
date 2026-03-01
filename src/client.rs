@@ -70,7 +70,7 @@ async fn listen_mode(mut relay_stream: TcpStream, local_addr: SocketAddr) {
     relay_stream.write_all(msg.as_bytes()).await.unwrap();
     println!("Sent 'LISTEN_READY:{}' to relay", dial_peer_addr);
     
-    // Étape 3 : Test de connexion directe (avant hole punching)
+    // // Étape 3 : Test de connexion directe (avant hole punching)
     // let _ = relay_stream.shutdown().await;
     // let listener = TcpListener::bind(local_addr).await.unwrap();
     // println!("Listening...");
@@ -78,23 +78,31 @@ async fn listen_mode(mut relay_stream: TcpStream, local_addr: SocketAddr) {
     // let (_, new_peer_address) = listener.accept().await.unwrap();
 	// println!("New peer connected as {}", new_peer_address);
 
-	let _ = relay_stream.shutdown().await; // Fermeture de la connexion au relais (optionnelle mais recommandée)
-	drop(relay_stream); // Libère immédiatement le socket
+	let _ = relay_stream.shutdown().await;
+    drop(relay_stream); // fermeture effective
 
-	// Petit délai pour laisser le système nettoyer (optionnel mais prudent)
-	tokio::time::sleep(Duration::from_millis(5000)).await;
+    // Créer un socket d'écoute avec réutilisation d'adresse
+    let socket = TcpSocket::new_v4().expect("Failed to create socket");
+    socket.set_reuseaddr(true).expect("Failed to set SO_REUSEADDR");
+    socket.bind(local_addr).expect("Failed to bind to local address");
+    let listener = socket.listen(1024).expect("Failed to listen");
 
-	// Créer un socket avec réutilisation d'adresse
-	let socket = TcpSocket::new_v4().expect("Failed to create socket");
-	socket.set_reuseport(true).ok();
-	socket.set_reuseaddr(true).expect("Failed to set reuseaddr");
-	socket.bind(local_addr).expect("Failed to bind");
-	let listener = socket.listen(1024).expect("Failed to listen");
-	println!("Listening on {} for incoming messages...", local_addr);
+    println!("Listening on {} for direct connection from dial", local_addr);
 
-	// Accepter une connexion entrante (celle du Dial)
-	let (mut stream, peer_addr) = listener.accept().await.expect("Accept failed");
-	println!("New peer connected as {}", peer_addr);
+    // Étape 4 : Accepter la connexion directe du pair Dial
+    match listener.accept().await {
+        Ok((direct_stream, peer_addr)) => {
+            println!("✅ Direct connection established with {}", peer_addr);
+            // Utiliser direct_stream pour la communication directe
+        }
+        Err(e) => {
+            println!("Failed to accept direct connection: {}", e);
+            return;
+        }
+    }
+	
+
+
 	
 	// Étape 4 : Hole Punching - connect() simultané
 	println!("🔨 Starting HOLE PUNCHING...");
