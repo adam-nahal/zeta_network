@@ -79,6 +79,10 @@ async fn listen_mode(relay_stream: &mut TcpStream, local_addr: SocketAddr) {
 	// println!("New peer connected as {}", new_peer_address);
 
 	let _ = relay_stream.shutdown().await; // Fermeture de la connexion au relais (optionnelle mais recommandée)
+	drop(relay_stream); // Libère immédiatement le socket
+
+	// Petit délai pour laisser le système nettoyer (optionnel mais prudent)
+	tokio::time::sleep(Duration::from_millis(100)).await;
 
 	// Créer un socket avec réutilisation d'adresse
 	let socket = TcpSocket::new_v4().expect("Failed to create socket");
