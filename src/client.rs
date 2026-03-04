@@ -18,7 +18,7 @@ pub async fn main_client(opts: Opts) {
     let addr_relay = format!("{}:{}", ip_relay, port_relay).parse().expect("Wrong address format");
     let socket_relay = UdpSocket::bind("0.0.0.0:0").await.expect("Failed to bind");
     let message = "HELLO_RELAY";
-    socket_relay.send_to(message.as_bytes(), &addr_relay).await;
+    let _ = socket_relay.send_to(message.as_bytes(), &addr_relay).await;
 
     println!("\n\n## Let's create direct connection with other peers ##");
     match opts.mode {
@@ -64,15 +64,35 @@ async fn listen_mode(socket_relay: UdpSocket, addr_relay: SocketAddr) {
 
     // Étape 2 : Annoncer au relai qu'on est prêt à recevoir
     let msg = format!("LISTEN_READY:{}", dial_peer_addr);
-    socket_relay.send_to(msg.as_bytes(), addr_relay).await.unwrap();
+    let _ = socket_relay.send_to(msg.as_bytes(), addr_relay).await.unwrap();
     println!("Sent '{}' to relay", msg);
     
-    // // Étape 3 : Test de connexion directe (avant hole punching)
+    // Étape 3 : Test de connexion directe (avant hole punching)
+    loop {
+	    let socket_dial = UdpSocket::bind("0.0.0.0:0").await.expect("Failed to bind");
+    	// Récupération des message reçu
+    	let mut buf = [0; 1024];
+    	let (size, addr_last_jump) = socket_dial.recv_from(&mut buf).await.expect("Nothing received");
+	    if size <= 0 || size >= 1024  {
+	    	println!("The message's size is incorrect({})", size); 
+	    	return; 
+	    }
+	    let message = String::from_utf8_lossy(&buf[..size]).trim().to_string();
 
+	    // Recherche de l'adresse dans le message du dial
+	    if let Some(addr_last_jump) = message.split('[').nth(1).and_then(|s| s.split(']').next()) {
+	        if let Ok(addr_sender) = addr_last_jump.parse::<SocketAddr>() {
+	        	if addr_sender == dial_peer_addr {
+	            	println!("Direction connection possible ({})", message);
+	            	break;
+	            }
+	        }
+	    }
+
+	    // Affichage du message reçu, si ce n'est pas celui attendu
+	    println!("[{}] {}", addr_last_jump, message);
+	};
 	
-
-
-
 	// Étape 4 : Hole Punching - connect() simultané
 	println!("🔨 Starting HOLE PUNCHING...");
 
@@ -83,7 +103,7 @@ async fn dial_mode(socket_relay: UdpSocket, addr_relay: SocketAddr, remote_peer_
     // Étape 1 : Demander au relai de nous connecter au peer Listen
     println!("\nInitiating connection to {}:{} (DIAL MODE)...", remote_peer_ip, remote_peer_port);
     let msg = format!("DIAL_REQUEST:{}:{}\n", remote_peer_ip, remote_peer_port);
-    socket_relay.send_to(msg.as_bytes(), addr_relay).await.unwrap();
+    let _ = socket_relay.send_to(msg.as_bytes(), addr_relay).await.unwrap();
     println!("Sent '{}' to relay", msg);
     
     // Étape 2 : Recevoir l'adresse du peer Listen via le relai
@@ -110,9 +130,10 @@ async fn dial_mode(socket_relay: UdpSocket, addr_relay: SocketAddr, remote_peer_
 	};
 
     // Étape 3 : Test de connexion directe (avant hole punching)
-
+	let socket_listen = UdpSocket::bind("0.0.0.0:0").await.expect("Failed to bind");
+    socket_listen.send_to("Direct connection".as_bytes(), listen_peer_addr).await.unwrap();
+    println!("Sent '{}' to relay", msg);
 
 	// Étape 4 : Hole Punching - connect() simultané
 	println!("🔨 Starting HOLE PUNCHING...");
-
 }
