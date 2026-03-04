@@ -16,7 +16,7 @@ pub async fn main_client(opts: Opts) {
     let ip_relay = opts.relay_ip.expect("--relay-ip est requis");
     let port_relay = opts.relay_port.expect("--relay-port est requis");
     let addr_relay = format!("{}:{}", ip_relay, port_relay).parse().expect("Wrong address format");
-    let socket_relay = UdpSocket::bind(&addr_relay).await.expect("Failed to bind");
+    let socket_relay = UdpSocket::bind("0.0.0.0:0").await.expect("Failed to bind");
     let local_addr = socket_relay.local_addr().expect("Failed to get local address");
     let message = "HELLO_RELAY";
     socket_relay.send_to(message.as_bytes(), &addr_relay).await;
