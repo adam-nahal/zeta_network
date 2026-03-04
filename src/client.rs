@@ -154,12 +154,12 @@ async fn dial_mode(socket: UdpSocket, addr_relay: SocketAddr, remote_peer_ip: &s
 	    	// Récupération des messages reçus
 	    	let mut buf = [0; 1024];
 	    	let (size, _) = socket.recv_from(&mut buf).await.expect("Nothing received");
-	    	println!("Message received");
 		    if size <= 0 || size >= 1024  {
 		    	println!("The message's size is incorrect({})", size); 
 		    	return; 
 		    }
 		    let message = String::from_utf8_lossy(&buf[..size]).trim().to_string();
+	    	println!("Message received: '{}'", message);
 
 		    // Recherche de l'adresse dans le message du dial
 		    if let Some(addr_sender) = message.split('[').nth(1).and_then(|s| s.split(']').next()) {
