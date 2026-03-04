@@ -1,8 +1,7 @@
-use tokio::net::{TcpStream, TcpListener, TcpSocket};
+use tokio::net::{TcpStream, TcpSocket};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{sleep, Duration, timeout};
 use std::net::SocketAddr;
-use std::io::{self, Write};
 use crate::{Opts, Mode};
 
 use crate::nat_detector::nat_detector;
@@ -19,8 +18,8 @@ pub async fn main_client(opts: Opts) {
     let ip_relay = opts.relay_ip.expect("--relay-ip est requis");
     let port_relay = opts.relay_port.expect("--relay-port est requis");
     let socket_relay = format!("{}:{}", ip_relay, port_relay);
-    
-    let mut relay_stream = TcpStream::connect(&socket_relay).await
+
+    let relay_stream = TcpStream::connect(&socket_relay).await
         .expect(&format!("[ERROR] Can't connect to relay {}", socket_relay));
     let local_addr = relay_stream.local_addr().unwrap();
     println!("\nConnected to relay {}", socket_relay);
@@ -89,24 +88,20 @@ async fn listen_mode(mut relay_stream: TcpStream, local_addr: SocketAddr) {
 
     println!("Listening on {} for direct connection from dial", local_addr);
 
-    // Étape 4 : Accepter la connexion directe du pair Dial
+    // Étape 4 : Hole Punching - accept() simultané
+    println!("🔨 Starting HOLE PUNCHING (listen mode)...");
+
+    // Accepter la connexion directe du pair Dial
     match listener.accept().await {
         Ok((direct_stream, peer_addr)) => {
             println!("✅ Direct connection established with {}", peer_addr);
             // Utiliser direct_stream pour la communication directe
+            handle_direct_connection(direct_stream).await;
         }
         Err(e) => {
-            println!("Failed to accept direct connection: {}", e);
-            return;
+            println!("❌ Failed to accept direct connection: {}", e);
         }
     }
-	
-
-
-	
-	// Étape 4 : Hole Punching - connect() simultané
-	println!("🔨 Starting HOLE PUNCHING...");
-
 }
 
 // ==================== MODE DIAL ====================
@@ -149,12 +144,55 @@ async fn dial_mode(mut relay_stream: TcpStream, local_addr: SocketAddr, remote_p
     match timeout(Duration::from_secs(5), TcpStream::connect(listen_peer_addr)).await {
 	    Ok(Ok(stream)) => {
 	        println!("✓ Direct connection to {}", listen_peer_addr);
+            handle_direct_connection(stream).await;
 	        return;
 	    }
-	    _ => println!("Direct connection failed")
+	    _ => println!("Direct connection failed, proceeding with hole punching...")
 	}
 
-	// Étape 4 : Hole Punching - connect() simultané
-	println!("🔨 Starting HOLE PUNCHING...");
+    // Étape 4 : Hole Punching - connect() simultané
+    println!("🔨 Starting HOLE PUNCHING (dial mode)...");
 
+    // Créer un socket avec réutilisation d'adresse pour le hole punching
+    let socket = TcpSocket::new_v4().expect("Failed to create socket");
+    socket.set_reuseaddr(true).expect("Failed to set SO_REUSEADDR");
+    socket.bind(local_addr).expect("Failed to bind to local address");
+
+    // Tenter la connexion avec hole punching
+    match socket.connect(listen_peer_addr).await {
+        Ok(direct_stream) => {
+            println!("✅ Direct connection established via hole punching to {}", listen_peer_addr);
+            handle_direct_connection(direct_stream).await;
+        }
+        Err(e) => {
+            println!("❌ Hole punching failed: {}", e);
+            println!("💡 Ensure both peers are running simultaneously and NAT allows hole punching");
+        }
+    }
+}
+
+// ==================== DIRECT CONNECTION HANDLER ====================
+async fn handle_direct_connection(mut stream: TcpStream) {
+    println!("📡 Direct connection ready for data transfer");
+    
+    let (mut read_half, _) = stream.split();
+    let mut buffer = [0; 1024];
+    
+    // Read incoming data loop
+    loop {
+        match read_half.read(&mut buffer).await {
+            Ok(0) => {
+                println!("📴 Connection closed by peer");
+                break;
+            }
+            Ok(n) => {
+                let data = String::from_utf8_lossy(&buffer[..n]);
+                println!("📥 Received: {}", data.trim());
+            }
+            Err(e) => {
+                println!("❌ Read error: {}", e);
+                break;
+            }
+        }
+    }
 }
