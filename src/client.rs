@@ -105,7 +105,7 @@ async fn listen_mode(socket: UdpSocket, addr_relay: SocketAddr) {
 	}
 
 	// Étape 5 : Test de connexion directe (envoi)
-    sleep(Duration::from_secs(1)).await;
+    sleep(Duration::from_secs(3)).await;
     let msg = format!("HELLO_DIAL_FROM_LISTEN:{}", dial_peer_addr);
     let _ = socket.send_to(msg.as_bytes(), dial_peer_addr).await.unwrap();
     println!("Sent '{}' to dial", msg);
@@ -149,7 +149,7 @@ async fn dial_mode(socket: UdpSocket, addr_relay: SocketAddr, remote_peer_ip: &s
     println!("Sent '{}' to relay", msg);
 
 	// Étape 4 : Test de connexion directe (reception)
-    let timeout_result = timeout(Duration::from_secs(5), async { 
+    let timeout_result = timeout(Duration::from_secs(10), async { 
     	loop {
 	    	// Récupération des messages reçus
 	    	let mut buf = [0; 1024];
