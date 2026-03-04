@@ -84,7 +84,7 @@ async fn listen_mode(socket: UdpSocket, addr_relay: SocketAddr) {
 		    if let Some(addr_last_jump) = message.split('[').nth(1).and_then(|s| s.split(']').next()) {
 		        if let Ok(addr_sender) = addr_last_jump.parse::<SocketAddr>() {
 		        	if addr_sender == dial_peer_addr {
-		            	println!("Direction connection possible ({})", message);
+		            	println!("Direction connection is possible!");
 		            	break;
 		            }
 		        }
