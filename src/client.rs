@@ -146,7 +146,7 @@ async fn dial_mode(socket: UdpSocket, addr_relay: SocketAddr, remote_peer_ip: &s
     // Étape 3 : Test de connexion directe (envoi)
     sleep(Duration::from_secs(1)).await;
     socket.send_to("IS_HOLE_PUNCHED".as_bytes(), listen_peer_addr).await.unwrap();
-    println!("Sent '{}' to relay", msg);
+    println!("Sent 'IS_HOLE_PUNCHED' to relay");
 
 	// Étape 4 : Test de connexion directe (reception)
     let timeout_result = timeout(Duration::from_secs(10), async { 
@@ -154,6 +154,7 @@ async fn dial_mode(socket: UdpSocket, addr_relay: SocketAddr, remote_peer_ip: &s
 	    	// Récupération des messages reçus
 	    	let mut buf = [0; 1024];
 	    	let (size, _) = socket.recv_from(&mut buf).await.expect("Nothing received");
+	    	println!("Message received");
 		    if size <= 0 || size >= 1024  {
 		    	println!("The message's size is incorrect({})", size); 
 		    	return; 
