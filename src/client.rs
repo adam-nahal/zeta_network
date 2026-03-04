@@ -93,7 +93,7 @@ async fn listen_mode(socket: UdpSocket, addr_relay: SocketAddr) {
 		    println!("[{}] {}", addr_last_jump, message);
 		}
 	}).await;
-	println!("Direction connection failed")
+	println!("Direction connection failed");
 	
 	// Étape 4 : Hole Punching - connect() simultané
 	println!("\nStarting HOLE PUNCHING...");
