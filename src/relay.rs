@@ -25,7 +25,7 @@ pub async fn main_relay() {
             Ok((size, peer_addr)) => {
                 // Affichage du message
                 let message = String::from_utf8_lossy(&buf[..size]).trim().to_string();
-                println!("[{}] {:?}", peer_addr, message);
+                println!("MESSAGE:'{}'", message);
 
                 // Ajout du client dans le repertoire
                 let connected_peers_clone = Arc::clone(&peers_list);
@@ -47,8 +47,7 @@ async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, message: &str,
 
     for (other_addr, _) in peers_map.iter_mut() {
         if other_addr != &sender_addr {
-            let formatted = format!("[{}] {}\n", sender_addr, message);
-            if let Err(e) = socket.send_to(formatted.as_bytes(), *other_addr).await {
+            if let Err(e) = socket.send_to(message.as_bytes(), *other_addr).await {
                 eprintln!("Failed to send to {}: {}", other_addr, e);
             } else {
                 println!("	Relayed to {}", other_addr);
