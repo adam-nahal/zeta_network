@@ -1,6 +1,6 @@
 use std::fmt;
 use tokio::net::UdpSocket;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use clap::{Parser, ValueEnum};
 use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
@@ -15,17 +15,13 @@ struct Opts {
     #[arg(long, value_enum)]
     mode: Mode,
 
-    // Adresse du relai qui va permettre le hole punching
-    #[arg(long, required_if_eq_any([("mode", "dial"), ("mode", "listen")]), help("Peers in dial/listen mode require '--relay-ip'"))]
-    relay_ip: Option<String>,
-    #[arg(long, required_if_eq_any([("mode", "dial"), ("mode", "listen")]), help("Peers in dial/listen mode require '--relay-port'"))]
-    relay_port: Option<u16>,
+    // Adresse du relai qui va permettre de connecter les noeuds (au moins au début)
+    #[arg(long, required_if_eq_any([("mode", "dial"), ("mode", "listen")]), help("Peers in dial/listen mode require '--relay-addr 1.2.3.4:5678'"))]
+    relay_addr: Option<String>,
 
-    // L'adresse ip du noeud auquel l' (dial) veut se connecter
-    #[arg(long, required_if_eq("mode", "dial"), help("Peers in dial mode require '--remote-peer-ip'"))]
-    remote_peer_ip: Option<String>,
-    #[arg(long, required_if_eq("mode", "dial"), help("Peers in dial mode require '--remote-peer-port'"))]
-    remote_peer_port: Option<String>,
+    // L'adresse du noeud auquel le dial veut se connecter
+    #[arg(long, required_if_eq("mode", "dial"), help("Peers in dial mode require '--remote-peer-addr 1.2.3.4:5678'"))]
+    remote_peer_addr: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, ValueEnum)]
@@ -90,4 +86,15 @@ impl fmt::Display for Message {  // Pour pouvoir faire print("{}", msg) avec un 
             write!(f, "[{}→{}] \"{}\" (t={})", self.src, self.dst, self.txt, self.time)
         }
     }
+}
+
+async fn get_public_ip(socket: &UdpSocket) -> Result<SocketAddr> {
+    let stun_addr = "stun.l.google.com:19302"
+        .to_socket_addrs()?
+        .find(|a| a.is_ipv4())
+        .ok_or_else(|| anyhow::anyhow!("Cannot resolve STUN server"))?;
+
+    let client = stunclient::StunClient::new(stun_addr);
+    let public_addr = client.query_external_address_async(socket).await?;
+    Ok(public_addr)
 }

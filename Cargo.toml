@@ -17,3 +17,4 @@ async-trait = "0.1.89"
 anyhow = "1.0.102"
 bincode = "1"
 chrono = "0.4.44"
+stunclient = { version = "0.4.2", default-features = false, features = ["async"] }

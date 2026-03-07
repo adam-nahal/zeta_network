@@ -22,7 +22,7 @@ pub async fn nat_detector () -> std::io::Result<(NatType, SocketAddr)> {
     logger.init().unwrap();
     let vec = stun_servers.unwrap_or_else(|| {
         let vec: Vec<String> = include_str!("valid_ipv4s.txt").lines().map(|e|e.trim().to_string()).collect();
-        // select 10 server randomly
+        // select server randomly
         let mut rng = rand::thread_rng();
         let mut new_vec = Vec::new();
         for _ in 0..stun_servers_count {

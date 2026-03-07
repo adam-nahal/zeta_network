@@ -2,26 +2,27 @@ use tokio::net::UdpSocket;
 use tokio::time::{sleep, Duration, timeout};
 use std::net::SocketAddr;
 use crate::{Opts, Mode};
-use crate::UdpSocketExt;
-use crate::Message;
+use crate::{Message, UdpSocketExt, get_public_ip};
 
 use crate::nat_detector::nat_detector;
 
 
 pub async fn main_client(opts: Opts) {
-	// Description de ce noeud
-	println!("\nLooking for NAT type and public IP address...");
-	let (nat_type, public_addr) = nat_detector().await
+	// Initialisation du noeud
+	println!("\nLooking for NAT type...");
+	let (nat_type, _) = nat_detector().await
 		.expect("[ERROR] NAT type not detected");
-    println!("   -> {:?}\n   -> {}", nat_type, public_addr);
+    println!("   -> {:?}\n", nat_type);
+
+    let addr_relay = opts.relay_addr.expect("--relay-addr est requis").parse().expect("Wrong address format");
+    let socket = UdpSocket::bind("0.0.0.0:0").await.expect("Failed to bind");
+    let public_addr:SocketAddr = get_public_ip(&socket).await.expect("Public IP not obtained.");
+    println!("Socket created on public address {:?}", public_addr);
 
     // Envoi du premier message au relai
-    let ip_relay = opts.relay_ip.expect("--relay-ip est requis");
-    let port_relay = opts.relay_port.expect("--relay-port est requis");
-    let addr_relay = format!("{}:{}", ip_relay, port_relay).parse().expect("Wrong address format");
-    let socket = UdpSocket::bind("0.0.0.0:0").await.expect("Failed to bind");
     let _ = socket.send_txt(public_addr, addr_relay, "HELLO_RELAY", addr_relay).await;
 
+    // Ajout de ce noeud au réseau Zeta Network
     println!("\n\n## Let's create direct connection with other peers ##");
     match opts.mode {
         Mode::Listen => {
@@ -31,8 +32,7 @@ pub async fn main_client(opts: Opts) {
             dial_mode(
                 socket, addr_relay, 
                 public_addr,
-                &opts.remote_peer_ip.expect("--remote-peer-ip requis"), 
-                &opts.remote_peer_port.expect("--remote-peer-port requis")
+                opts.remote_peer_addr.expect("--remote-peer-addr required").parse().expect("Wrong address format"),
                 ).await;
         }
         _ => unreachable!()
@@ -101,10 +101,10 @@ async fn listen_mode(socket: UdpSocket, addr_relay: SocketAddr, public_addr: Soc
 }
 
 // ==================== MODE DIAL ====================
-async fn dial_mode(socket: UdpSocket, addr_relay: SocketAddr, public_addr: SocketAddr, remote_peer_ip: &str, remote_peer_port: &str) {
+async fn dial_mode(socket: UdpSocket, addr_relay: SocketAddr, public_addr: SocketAddr, remote_peer_addr: SocketAddr) {
     // Étape 1 : Demander au relai de nous connecter au peer Listen
-    println!("\nInitiating connection to {}:{} (DIAL MODE)...", remote_peer_ip, remote_peer_port);
-    let msg = format!("DIAL_REQUEST:{}:{}", remote_peer_ip, remote_peer_port);
+    println!("\nInitiating connection to {} (DIAL MODE)...", remote_peer_addr);
+    let msg = format!("DIAL_REQUEST:{}", remote_peer_addr);
     let _ = socket.send_txt(public_addr, addr_relay, &msg, addr_relay).await.unwrap();
     println!("Sent '{}' to relay", msg);
     
