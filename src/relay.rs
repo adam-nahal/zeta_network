@@ -1,5 +1,6 @@
 use tokio::net::UdpSocket;
 use tokio::sync::Mutex;
+use tokio::time::{Duration, sleep};
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -8,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::{Message, UdpSocketExt, get_public_ip};
 use crate::nat_detector::nat_detector;
 
-type PeersMap = Arc<Mutex<HashMap<SocketAddr, u64>>>; // un noeud = [Addr, date dernière connection en sec]
+type PeersMap = Arc<Mutex<HashMap<SocketAddr, (String, u64)>>>; // un noeud = [Addr, date dernière connection en sec]
 
 pub async fn main_relay() {
 	// Description de ce noeud
@@ -27,24 +28,36 @@ pub async fn main_relay() {
     // Crée la liste de tous les clients qui ont contacté ce relai
     let peers_list: PeersMap = Arc::new(Mutex::new(HashMap::new()));
 
+    // Suppression automatique des noeuds inactifs
+    let peers_cleanup = Arc::clone(&peers_list);
+	tokio::spawn(async move {
+	    loop {
+	        sleep(Duration::from_secs(30)).await;
+	        delete_disconnected_peers(&peers_cleanup).await;
+	    }
+	});
+
     let mut buf = vec![0; 1024];
     loop {
         match socket.recv_from(&mut buf).await {
-            Ok((size, peer_addr)) => {
+            Ok((size, sender_addr)) => {
                 // Affichage du message
                 let msg: Message = bincode::deserialize(&buf[..size]).expect("[ERROR] Deserialization failed");
                 println!("{}", msg);
 
                 // Ajout du client dans le repertoire
                 let connected_peers_clone = Arc::clone(&peers_list);
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards")
-                    .as_secs();
-                connected_peers_clone.lock().await.insert(peer_addr, now);
+                if let Message::Register { src_addr, src_id, time, .. } = &msg { 
+                	if sender_addr == *src_addr {
+                		connected_peers_clone.lock().await.insert(sender_addr, (src_id.clone(), *time));
+                	}
+            	}
 
-                if public_addr != msg.dst {
-                	relay_message(&connected_peers_clone, peer_addr, msg, &socket).await;
+            	// Relaie le message si c'est un message à relayer
+                if let Message::Classic { dst_addr, .. } = &msg {
+                	if public_addr != *dst_addr {
+                		relay_message(&connected_peers_clone, sender_addr, msg, &socket).await;
+                	}
                	}
             }
             Err(e) => eprintln!("[ERROR]: a message contain an error ({})", e),
@@ -64,4 +77,17 @@ async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, msg: Message, 
             }
         }
     }
+}
+
+async fn delete_disconnected_peers(peers: &PeersMap) {
+    let mut peers_map = peers.lock().await;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs();
+    peers_map.retain(|addr, (_, last_seen)| {
+        let active = now - *last_seen < 60;
+        if !active { println!("[INFO] Peer {} disconnected (timeout)", addr); }
+        active
+    });
 }
