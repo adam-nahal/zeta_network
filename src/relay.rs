@@ -47,8 +47,8 @@ pub async fn main_relay() {
 
                 // Ajout des nouveaux noeuds ou mise à jour de la dernière connection
                 let connected_peers_clone = Arc::clone(&peers_list);
-                if let Message::Register { src_addr, src_id, time, .. } = &msg {
-                	connected_peers_clone.lock().await.insert(sender_addr, (src_id.clone(), *time));
+                if let Message::Register { src_id, time, .. } = &msg {
+                	connected_peers_clone.lock().await
 				        .entry(sender_addr)  // La clé existe-t-elle déjà ?
     					.and_modify(|(_, t)| *t = *time)
 				        .or_insert((src_id.clone(), *time));
@@ -57,15 +57,23 @@ pub async fn main_relay() {
             	// Relaie le message si c'est un message à relayer
                 if let Message::Classic { dst_addr, .. } = &msg {
                 	if public_addr != *dst_addr {
-                		relay_message(&connected_peers_clone, sender_addr, msg, &socket).await;
+                		relay_message(&connected_peers_clone, sender_addr, msg.clone(), &socket).await;
                 	}
                	}
 
                	// Répond aux demandes d'informations
-                if let Message::AskForAddr { dst_addr, .. } = &msg {
-                	if public_addr != *dst_addr {
-                		relay_message(&connected_peers_clone, sender_addr, msg, &socket).await;
-                	}
+                if let Message::AskForAddr { src_addr, peer_id, .. } = &msg {
+                	let map = connected_peers_clone.lock().await;  // lock d'abord
+				    if let Some((found_addr, _)) = map.iter().find(|(_, (id, _))| id == peer_id) {
+				        let reply = Message::PeerInfo {
+				            peer_addr: *found_addr,
+				            peer_id: peer_id.clone(),
+				        };
+				        drop(map);  // libère le lock avant le send
+				        let _ = socket.send_msg(&reply, *src_addr).await;
+				    } else {
+				        eprintln!("Peer {} not found", peer_id);
+				    }
                	}
             }
             Err(e) => eprintln!("[ERROR]: a message contain an error ({})", e),
