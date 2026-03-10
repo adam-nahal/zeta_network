@@ -123,7 +123,10 @@ impl fmt::Display for Message {
                 write!(f, "[Connect] {} ({}) → ? ({}) ({})", src_addr, src_id, dst_id, time_str)
             }
             Message::AskForAddr { src_addr, src_id, peer_id, time } => {
-                write!(f, "[AskInfo] {} ({}) asks for {}'s addr ({})", *src_addr, src_id, peer_id, *time)
+                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
+                    .map(|dt| dt.format("%H:%M:%S").to_string())
+                    .unwrap_or_else(|| format!("t={}", time));
+                write!(f, "[AskInfo] {} ({}) asks for {}'s addr ({})", *src_addr, src_id, peer_id, time_str)
             }
             Message::PeerInfo { peer_addr, peer_id } => {
                 write!(f, "[PeerInfo] {} ({})", peer_addr, peer_id)

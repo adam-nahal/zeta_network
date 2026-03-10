@@ -45,16 +45,24 @@ pub async fn main_relay() {
                 let msg: Message = bincode::deserialize(&buf[..size]).expect("[ERROR] Deserialization failed");
                 println!("{}", msg);
 
-                // Ajout du client dans le repertoire
+                // Ajout des nouveaux noeuds ou mise à jour de la dernière connection
                 let connected_peers_clone = Arc::clone(&peers_list);
-                if let Message::Register { src_addr, src_id, time, .. } = &msg { 
-                	if sender_addr == *src_addr {
-                		connected_peers_clone.lock().await.insert(sender_addr, (src_id.clone(), *time));
-                	}
+                if let Message::Register { src_addr, src_id, time, .. } = &msg {
+                	connected_peers_clone.lock().await.insert(sender_addr, (src_id.clone(), *time));
+				        .entry(sender_addr)  // La clé existe-t-elle déjà ?
+    					.and_modify(|(_, t)| *t = *time)
+				        .or_insert((src_id.clone(), *time));
             	}
 
             	// Relaie le message si c'est un message à relayer
                 if let Message::Classic { dst_addr, .. } = &msg {
+                	if public_addr != *dst_addr {
+                		relay_message(&connected_peers_clone, sender_addr, msg, &socket).await;
+                	}
+               	}
+
+               	// Répond aux demandes d'informations
+                if let Message::AskForAddr { dst_addr, .. } = &msg {
                 	if public_addr != *dst_addr {
                 		relay_message(&connected_peers_clone, sender_addr, msg, &socket).await;
                 	}
