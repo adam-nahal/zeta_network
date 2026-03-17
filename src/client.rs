@@ -164,6 +164,7 @@ async fn dial_mode(socket: UdpSocket, relay_addr: SocketAddr, public_addr: Socke
 
         if let Message::PeerInfo { peer_addr, peer_id, .. } = &msg {
             if peer_id.clone() == listen_peer_id.clone() {
+                println!("{}", msg);
                 break *peer_addr;
             }
         } else {
