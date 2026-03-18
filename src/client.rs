@@ -140,7 +140,7 @@ async fn listen_mode(socket: UdpSocket, relay_addr: SocketAddr, public_addr: Soc
 
 // ==================== MODE DIAL ====================
 async fn dial_mode(socket: UdpSocket, relay_addr: SocketAddr, public_addr: SocketAddr, peer_id: String, listen_peer_id: String) {
-    // Étape 1 : Demander au relai de nous connecter au peer Listen
+    // Étape 0 : Demander au relai les informations sur le listen
     println!("\nInitiating connection to {} (DIAL MODE)...", listen_peer_id);
     let msg = Message::AskForAddr {
         src_addr: public_addr,
@@ -151,7 +151,7 @@ async fn dial_mode(socket: UdpSocket, relay_addr: SocketAddr, public_addr: Socke
     let _ = socket.send_msg(&msg, relay_addr).await.unwrap();
     println!("Sent '{}' to relay", msg);
     
-    // Étape 2 : Recevoir l'adresse du peer Listen via le relai
+    // Étape 1 : Recevoir l'adresse du peer Listen via le relai
     let listen_peer_addr: SocketAddr = loop { 
         // Récupération des message reçu
         let mut buf = [0; 1024];
@@ -171,6 +171,17 @@ async fn dial_mode(socket: UdpSocket, relay_addr: SocketAddr, public_addr: Socke
             println!("Received a message:\n    {}", msg);
         }
     };
+
+    // Étape 2 : Demander au relai de nous connecter au peer Listen
+    let msg = Message::Connect {
+        src_addr: public_addr,
+        src_id: peer_id.clone(),
+        dst_addr: listen_peer_addr,
+        dst_id: listen_peer_id.clone(),
+        time: SystemTime::now().duration_since(UNIX_EPOCH).expect("Time went backwards").as_secs(),
+    };
+    let _ = socket.send_msg(&msg, relay_addr).await.unwrap();
+    println!("Sent '{}' to relay", msg);
 
     // Étape 3 : Test de connexion directe (envoi)
     sleep(Duration::from_secs(1)).await;

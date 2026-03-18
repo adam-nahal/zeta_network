@@ -61,6 +61,18 @@ pub async fn main_relay() {
                 	}
                	}
 
+            	// Fait le pont entre deux noeuds
+                if let Message::Connect { dst_addr, dst_id, .. } = &msg {
+                	let map = connected_peers_clone.lock().await;  // lock d'abord
+				    if map.contains_key(dst_addr) {
+				        drop(map);  // libère le lock avant le send
+				        let _ = socket.send_msg(&msg, *dst_addr).await;
+                		println!("Sent to {}: '{}'", dst_addr, msg);
+				    } else {
+				        eprintln!("Peer {} ({}) is logged out", dst_addr, dst_id);
+				    }
+               	}
+
                	// Répond aux demandes d'informations
                 if let Message::AskForAddr { src_addr, peer_id, .. } = &msg {
                 	let map = connected_peers_clone.lock().await;  // lock d'abord

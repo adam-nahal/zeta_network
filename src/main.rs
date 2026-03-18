@@ -47,7 +47,8 @@ pub enum Message {
     Connect {  // Dial → Relay : "Mets-moi en contact avec ce peer_id"
         src_addr: SocketAddr,
         src_id: String,
-        dst_id: String,   // l'id du Listen recherché
+        dst_addr: SocketAddr,   // l'id du Listen recherché
+        dst_id: String,
         time: u64,
     },
 
@@ -116,11 +117,11 @@ impl fmt::Display for Message {
                     .unwrap_or_else(|| format!("t={}", time));
                 write!(f, "[Register] {} ({}) → {} ({}) ({})", src_addr, src_id, dst_addr, dst_id, time_str)
             }
-            Message::Connect { src_addr, src_id, dst_id, time } => {
+            Message::Connect { src_addr, src_id, dst_id, dst_addr, time } => {
                 let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
                     .map(|dt| dt.format("%H:%M:%S").to_string())
                     .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[Connect] {} ({}) → ? ({}) ({})", src_addr, src_id, dst_id, time_str)
+                write!(f, "[Connect] {} ({}) → ? {} ({}) ({})", src_addr, src_id, dst_addr, dst_id, time_str)
             }
             Message::AskForAddr { src_addr, src_id, peer_id, time } => {
                 let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
