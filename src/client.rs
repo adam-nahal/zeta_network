@@ -3,7 +3,7 @@ use tokio::time::{sleep, Duration, timeout};
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::{SystemTime, UNIX_EPOCH};
 use crate::{Opts, Mode};
-use crate::{Message, UdpSocketExt, get_public_ip};
+use crate::{Message, UdpSocketExt, get_public_ip, recv_msg};
 
 use crate::nat_detector::nat_detector;
 
@@ -55,15 +55,9 @@ async fn listen_mode(socket: UdpSocket, relay_addr: SocketAddr, public_addr: Soc
     println!("Waiting for the dial's address (LISTEN MODE)...");
     let (dial_peer_addr, dial_peer_id) = loop {
         // Récupération des message reçu
-        let mut buf = [0; 1024];
-        let (size, _) = socket.recv_from(&mut buf).await.expect("Nothing received");
-        if size <= 0 || size >= 1024  {
-            println!("The message's size is incorrect({})", size); 
-            return; 
-        }
-        let msg: Message = bincode::deserialize(&buf[..size]).expect("[ERROR] Deserialization failed");
+        let Some((msg, _)) = recv_msg(&socket).await else { return };
         if let Message::Connect {src_addr, src_id, ..} = &msg {
-            println!("Received dial peer address:\n    {}\n    -> {}\n    -> {}", msg, *src_addr, src_id.clone());
+            println!("Received dial peer address {} ({}) from:\n    {}", *src_addr, src_id.clone(), msg);
             break (*src_addr, src_id.clone());
         }
         println!("'{}'", msg);
@@ -98,13 +92,7 @@ async fn listen_mode(socket: UdpSocket, relay_addr: SocketAddr, public_addr: Soc
     let timeout_result = timeout(Duration::from_secs(5), async { 
         loop {
             // Récupération des messages reçus
-            let mut buf = [0; 1024];
-            let (size, _) = socket.recv_from(&mut buf).await.expect("Nothing received");
-            if size <= 0 || size >= 1024  {
-                println!("The message's size is incorrect({})", size); 
-                return; 
-            }
-            let msg: Message = bincode::deserialize(&buf[..size]).expect("[ERROR] Deserialization failed");
+            let Some((msg, _)) = recv_msg(&socket).await else { return };
 
             if let Message::Classic {src_addr, src_id, ..} = &msg {
                 if *src_addr == dial_peer_addr && src_id.clone() == dial_peer_id {  // Est-ce le dial ?
@@ -152,13 +140,7 @@ async fn dial_mode(socket: UdpSocket, relay_addr: SocketAddr, public_addr: Socke
     // Étape 1 : Recevoir l'adresse du peer Listen via le relai
     let listen_peer_addr: SocketAddr = loop { 
         // Récupération des message reçu
-        let mut buf = [0; 1024];
-        let (size, _) = socket.recv_from(&mut buf).await.expect("Nothing received");
-        if size <= 0 || size >= 1024  {
-            println!("The message's size is incorrect({})", size); 
-            return; 
-        }
-        let msg: Message = bincode::deserialize(&buf[..size]).expect("[ERROR] Deserialization failed");
+        let Some((msg, _)) = recv_msg(&socket).await else { return };
 
         if let Message::PeerInfo { peer_addr, peer_id, .. } = &msg {
             if peer_id.clone() == listen_peer_id.clone() {
@@ -192,19 +174,13 @@ async fn dial_mode(socket: UdpSocket, relay_addr: SocketAddr, public_addr: Socke
         txt: "Hello listen, it is a direct connection".to_string(),
     };
     socket.send_msg(&msg, listen_peer_addr).await.unwrap();
-    println!("Sent 'IS_HOLE_PUNCHED' to relay");
+    println!("Sent '{}' to relay", msg);
 
     // Étape 4 : Test de connexion directe (reception)
     let timeout_result = timeout(Duration::from_secs(10), async { 
         loop {
             // Récupération des messages reçus
-            let mut buf = [0; 1024];
-            let (size, _) = socket.recv_from(&mut buf).await.expect("Nothing received");
-            if size <= 0 || size >= 1024  {
-                println!("The message's size is incorrect({})", size); 
-                return; 
-            }
-            let msg: Message = bincode::deserialize(&buf[..size]).expect("[ERROR] Deserialization failed");
+            let Some((msg, _)) = recv_msg(&socket).await else { return };
 
             if let Message::Classic {src_addr, ..} = &msg {
                 if *src_addr == listen_peer_addr {  // Est-ce le dial ?

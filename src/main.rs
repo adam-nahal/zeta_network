@@ -152,3 +152,14 @@ async fn get_public_ip(socket: &UdpSocket) -> Result<SocketAddr> {
     let public_addr = client.query_external_address_async(socket).await?;
     Ok(public_addr)
 }
+
+async fn recv_msg(socket: &UdpSocket) -> Option<(Message, SocketAddr)> {
+    let mut buf = [0; 1024];
+    let (size, sender_addr) = socket.recv_from(&mut buf).await.expect("Nothing received");
+    if size == 0 || size >= 1024 {
+        println!("The message's size is incorrect({})", size);
+        return None;
+    }
+    let msg: Message = bincode::deserialize(&buf[..size]).expect("[ERROR] Deserialization failed");
+    Some((msg, sender_addr))
+}
