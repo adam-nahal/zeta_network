@@ -56,17 +56,15 @@ async fn listen_mode(socket: UdpSocket, relay_addr: SocketAddr, public_addr: Soc
     let (dial_peer_addr, dial_peer_id) = loop {
         // Récupération des message reçu
         let mut buf = [0; 1024];
-        let (size, sender_addr) = socket.recv_from(&mut buf).await.expect("Nothing received");
+        let (size, _) = socket.recv_from(&mut buf).await.expect("Nothing received");
         if size <= 0 || size >= 1024  {
             println!("The message's size is incorrect({})", size); 
             return; 
         }
         let msg: Message = bincode::deserialize(&buf[..size]).expect("[ERROR] Deserialization failed");
-        if let Message::Register {src_addr, src_id, ..} = &msg {
-            if sender_addr == relay_addr {
-                println!("Received dial peer address:\n    {}\n    -> {}\n    -> {}", msg, *src_addr, src_id.clone());
-                break (*src_addr, src_id.clone());
-            }
+        if let Message::Connect {src_addr, src_id, ..} = &msg {
+            println!("Received dial peer address:\n    {}\n    -> {}\n    -> {}", msg, *src_addr, src_id.clone());
+            break (*src_addr, src_id.clone());
         }
         println!("'{}'", msg);
     };
