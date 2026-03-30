@@ -8,13 +8,15 @@ use std::net::SocketAddr;
 use crate::lib_p2p::*;
 
 
-pub async fn main_hubRelay(peer_id: String) {
-    // Le relay démarre l'écoute
-    let port_relay = 55555;
-    let addr_relay = format!("0.0.0.0:{}", port_relay);
-    let socket = UdpSocket::bind(&addr_relay).await.expect("Failed to bind");
+pub async fn main_hubRelay(peer_id: String, hubRelay_addr: SocketAddr) {
+    // Le hub relay démarre l'écoute
+    let socket = UdpSocket::bind("0.0.0.0:55555").await.expect("Failed to bind");
     let public_addr: SocketAddr = get_public_ip(&socket).await.expect("Public IP not obtained.");
-    println!("\nListening on {}...", public_addr);
+    println!("\nThe hub relay listens on {} ({})...", public_addr, peer_id);
+    if hubRelay_addr != public_addr {
+    	println!("[ERROR] The hub relay has an address different as expected");
+    	return;
+    }
 
     // Crée la liste de tous les relais
     let relays_list: PeersMap = Arc::new(Mutex::new(HashMap::new()));
@@ -55,7 +57,7 @@ pub async fn main_hubRelay(peer_id: String) {
                     }
 
                     // Un peer cherche un relai : on lui en renvoie un
-                    Message::NeedRelay { src_addr, .. } => {
+                    Message::NeedRelay { src_addr, src_id, .. } => {
                         let relays = relays_list.lock().await;
                         if let Some((relay_addr, _)) = relays.iter().next() {
                             let msg = Message::PeerInfo {
@@ -64,15 +66,26 @@ pub async fn main_hubRelay(peer_id: String) {
                             };
                             let _ = socket.send_msg(&msg, *src_addr).await;
                             println!("{}", msg);
+
+                            // Avertissons le relais concerné
+                            let msg = Message::RelayHasNewClient {
+	                            src_addr: public_addr,
+	                            src_id: "hubRelay".to_string(),
+                                peer_addr: *src_addr,
+                                peer_id: src_id.clone(),
+                            	time: now_secs(),
+                            };
+                            let _ = socket.send_msg(&msg, *relay_addr).await;
+                            println!("{}", msg);
                         } else {
-                            eprintln!("[WARN] NeedRelay reçu mais aucun relai disponible");
+                            eprintln!("[WARN] NeedRelay recived but no relay available");
                         }
                     }
 
-                    _ => eprintln!("[WARN] Message inattendu de {}", sender_addr),
+                    _ => eprintln!("[WARN] Unrecognize message from {}", sender_addr),
                 }
             }
-            Err(e) => eprintln!("[ERROR]: a message contain an error ({})", e),
+            Err(e) => eprintln!("[ERROR] a message contain an error ({})", e),
         }
     }
 }

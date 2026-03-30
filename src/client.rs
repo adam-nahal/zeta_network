@@ -11,7 +11,7 @@ use crate::nat_detector::util::NatType::*;
 use crate::lib_p2p::*;
 
 
-pub async fn main_client(peer_id: String) {
+pub async fn main_client(peer_id: String, hubRelay_addr: SocketAddr) {
     // Initialisation du noeud
     println!("\nLooking for NAT type...");
     let (nat_type, _) = nat_detector().await
@@ -24,31 +24,24 @@ pub async fn main_client(peer_id: String) {
     println!("Socket created on public address {:?}", public_addr);
 
     // Demande un relais disponible au hubRelay
-    let msg = Message::Register {
+    println!("Asking the hub relay an available relay...");
+    let msg = Message::NeedRelay {
         src_addr: public_addr,
         src_id: peer_id.clone(),
-        dst_addr: relay_addr,
-        dst_id: "relay1".to_string(),
         time: now_secs(),
     };
-    let _ = socket.send_msg(&msg, relay_addr).await;  
+    let _ = socket.send_msg(&msg, hubRelay_addr).await;  
 
-    // Analyse du type de noeud
-    match nat_type {
-        OpenInternet | FullCone | RestrictedCone | PortRestrictedCone => {
-            user_and_relay(socket, public_addr, peer_id).await;
+    // Attends l'adresse d'un relais, de la part du hub relais
+    let relay_addr = loop {
+        // Récupération des messages reçu
+        let Some((msg, _)) = recv_msg(&socket).await else { return };
+        if let Message::PeerInfo {peer_addr, peer_id, ..} = &msg {
+            println!("Received a relay address {} ({})", *peer_addr, peer_id.clone());
+            break *peer_addr;
         }
-        SymmetricUdpFirewall | Symmetric => {
-            user_only(socket, public_addr, peer_id).await;
-        }
-        Unknown | UdpBlocked => {
-            println!("This node can't access the network ({:?})", nat_type);
-            return;
-        }
-    }
-
-
-    let relay_addr = opts.relay_addr.expect("--relay-addr required").parse().expect("Wrong address format");
+        println!("'{}'", msg);
+    };
 
     // Envoi du premier message au relai
     let msg = Message::Register {
@@ -61,24 +54,37 @@ pub async fn main_client(peer_id: String) {
     let _ = socket.send_msg(&msg, relay_addr).await;
 
     // Ajout de ce noeud au réseau Zeta Network
-    println!("\n\n## Let's create direct connection with other peers ##");
-    match opts.mode {
-        Mode::Listen => {
-            listen_mode(socket, relay_addr, public_addr, peer_id.clone()).await;
+    match nat_type {
+        OpenInternet | FullCone | RestrictedCone | PortRestrictedCone => {
+            println!("This node is become a relay ({:?})", nat_type);
+            user_and_relay(socket, public_addr, peer_id).await;
         }
-        Mode::Dial => {
-            dial_mode(
-                socket, relay_addr, 
-                public_addr, peer_id,
-                opts.listen_peer_id.expect("--listen-peer-id required").parse().expect("Wrong address format"),
-                ).await;
+        SymmetricUdpFirewall | Symmetric => {
+            println!("This node can't be a relay ({:?})", nat_type);
+            user_only(socket, public_addr, peer_id).await;
         }
-        _ => unreachable!()
+        Unknown | UdpBlocked => {
+            println!("This node can't access the network ({:?})", nat_type);
+            return;
+        }
     }
+
+    // match opts.mode {
+    //     Mode::Listen => {
+    //         listen_mode(socket, relay_addr, public_addr, peer_id.clone()).await;
+    //     }
+    //     Mode::Dial => {
+    //         dial_mode(
+    //             socket, relay_addr, 
+    //             public_addr, peer_id,
+    //             opts.listen_peer_id.expect("--listen-peer-id required").parse().expect("Wrong address format"),
+    //             ).await;
+    //     }
+    //     _ => unreachable!()
+    // }
 }
 
 pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id: String) {
-    println!("This node is become a relay ({})", nat_type);
     // Le relay démarre l'écoute
     let socket = UdpSocket::bind("0.0.0.0:0").await.expect("Failed to bind");
     let public_addr: SocketAddr = get_public_ip(&socket).await.expect("Public IP not obtained.");
@@ -154,7 +160,6 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 }
 
 pub async fn user_only(socket: UdpSocket, public_addr: SocketAddr, peer_id: String) {
-    println!("This node can't be a relay ({})", nat_type);
         
 }
 

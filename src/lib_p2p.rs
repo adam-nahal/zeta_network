@@ -72,11 +72,28 @@ pub enum Message {
         time: u64,
     },
 
-    NeedRelay {  // new Relay → Serveur stockant les adresses des relais : "Je me déclare relay"
+    NeedRelay {
         src_addr: SocketAddr,
         src_id: String,
         time: u64,
     },
+
+    RelayHasNewClient {
+        src_addr: SocketAddr,
+        src_id: String,
+        peer_addr: SocketAddr,
+        peer_id: String,
+        time: u64,
+    },
+
+    NoRelayAvailable {
+        src_addr: SocketAddr,
+        src_id: String,
+        dst_addr: SocketAddr,
+        dst_id: String,
+        time: u64,
+    },
+
     Ack {
         src_addr: SocketAddr,
         src_id: String,
@@ -144,6 +161,18 @@ impl fmt::Display for Message {
                     .map(|dt| dt.format("%H:%M:%S").to_string())
                     .unwrap_or_else(|| format!("t={}", time));
                 write!(f, "[Ack] {} ({}) ({})", src_addr, src_id, time_str)
+            }
+            Message::RelayHasNewClient { peer_addr, peer_id, src_addr, src_id, time } => {
+                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
+                    .map(|dt| dt.format("%H:%M:%S").to_string())
+                    .unwrap_or_else(|| format!("t={}", time));
+                write!(f, "[RelayHasNewClient] {} ({}) wants to connect to relay {} ({}) ({})", peer_addr, peer_id, src_addr, src_id, time_str)
+            }
+            Message::NoRelayAvailable { src_addr, src_id, dst_addr, dst_id, time } => {
+                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
+                    .map(|dt| dt.format("%H:%M:%S").to_string())
+                    .unwrap_or_else(|| format!("t={}", time));
+                write!(f, "[NoRelayAvailable] [{} ({}) → {} ({})] ({})", src_addr, src_id, dst_addr, dst_id, time_str)
             }
         }
     }
