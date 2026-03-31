@@ -141,7 +141,7 @@ impl fmt::Display for Message {
                 let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
                     .map(|dt| dt.format("%H:%M:%S").to_string())
                     .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[AskInfo] {} ({}) asks for {}'s addr ({})", *src_addr, src_id, peer_id, time_str)
+                write!(f, "[AskForAddr] {} ({}) asks for {}'s addr ({})", *src_addr, src_id, peer_id, time_str)
             }
             Message::PeerInfo { peer_addr, peer_id } => {
                 write!(f, "[PeerInfo] {} ({})", peer_addr, peer_id)
@@ -186,7 +186,7 @@ impl fmt::Display for Message {
                 let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
                     .map(|dt| dt.format("%H:%M:%S").to_string())
                     .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[NoRelayAvailable] [{} ({}) → {} ({})] ({})", src_addr, src_id, dst_addr, dst_id, time_str)
+                write!(f, "[PunchTheHole] [{} ({}) → {} ({})] ({})", src_addr, src_id, dst_addr, dst_id, time_str)
             }
         }
     }
