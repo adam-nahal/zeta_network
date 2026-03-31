@@ -35,6 +35,10 @@ pub async fn main_hubRelay(peer_id: String, hubRelay_addr: SocketAddr) {
         match socket.recv_from(&mut buf).await {
             Ok((size, sender_addr)) => {
                 // Affichage du message
+                if let Err(e) = bincode::deserialize::<Message>(&buf[..size]) {
+    				eprintln!("[ERROR] Deserialization failed: {} (message from {})", e, sender_addr);
+    				continue; // passer au message suivant
+				}
                 let msg: Message = bincode::deserialize(&buf[..size]).expect("[ERROR] Deserialization failed");
                 println!("{}", msg);
 				
