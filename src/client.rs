@@ -122,79 +122,72 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
         }
     }    
 
-    let mut buf = vec![0; 1024];
     loop {
-        match socket.recv_from(&mut buf).await {
-            Ok((size, sender_addr)) => {
-                // Affichage du message
-                let msg: Message = bincode::deserialize(&buf[..size]).expect("[ERROR] Deserialization failed");
-                println!("{}", msg);
+    	let Some((msg, sender_addr)) = recv_msg(&socket).await else {continue};
+    	println!("<-{}", msg);
 
-                // Ajout des nouveaux noeuds ou mise à jour de la dernière connection
-                let connected_peers_clone = Arc::clone(&peers_list);
-                if let Message::Register { src_id, time, .. } = &msg {
-                    connected_peers_clone.lock().await
-                        .entry(sender_addr)  // La clé existe-t-elle déjà ?
-                        .and_modify(|(_, t)| *t = *time)
-                        .or_insert((src_id.clone(), *time));
-                }
+        // Ajout des nouveaux noeuds ou mise à jour de la dernière connection
+        let connected_peers_clone = Arc::clone(&peers_list);
+        if let Message::Register { src_id, time, .. } = &msg {
+            connected_peers_clone.lock().await
+                .entry(sender_addr)  // La clé existe-t-elle déjà ?
+                .and_modify(|(_, t)| *t = *time)
+                .or_insert((src_id.clone(), *time));
+        }
 
-                // Relaie le message si c'est un message à relayer
-                if let Message::Classic { dst_addr, .. } = &msg {
-                    if public_addr != *dst_addr {
-                        relay_message(&connected_peers_clone, sender_addr, msg.clone(), &socket).await;
-                    }
-                }
-
-                // Fait le pont entre deux noeuds
-                if let Message::Connect { dst_addr, dst_id, .. } = &msg {
-                    let map = connected_peers_clone.lock().await;  // lock d'abord
-                    if map.contains_key(dst_addr) {
-                        drop(map);  // libère le lock avant le send
-                        let _ = socket.send_msg(&msg, *dst_addr).await;
-                        println!("->({})", msg);
-                        println!("Sent to {}: '{}'", dst_addr, msg);
-                    } else {
-                        eprintln!("Peer {} ({}) is unknown", dst_addr, dst_id);
-                    }
-                }
-
-                // Ce relais a un nouveau client qui veut se connecter -> hole punching
-                if let Message::RelayHasNewClient { peer_addr, peer_id, time, .. } = &msg {           
-                    connected_peers_clone.lock().await
-                        .entry(sender_addr)  // La clé existe-t-elle déjà ?
-                        .and_modify(|(_, t)| *t = *time)
-                        .or_insert((peer_id.clone(), *time));
-                    let msg = Message::PunchTheHole {
-                        src_addr: public_addr,
-                        src_id: peer_id.clone(),
-                        dst_addr: *peer_addr,
-                        dst_id: peer_id.to_string(),
-                        time: now_secs(),
-                    };
-                    let _ = socket.send_msg(&msg, *peer_addr).await;
-                    println!("->({})", msg);
-                    
-                }
-
-                // Répond aux demandes d'informations
-                if let Message::AskForAddr { src_addr, peer_id, .. } = &msg {
-                    let map = connected_peers_clone.lock().await;  // lock d'abord
-                    if let Some((found_addr, _)) = map.iter().find(|(_, (id, _))| id == peer_id) {
-                        let msg = Message::PeerInfo {
-                            peer_addr: *found_addr,
-                            peer_id: peer_id.clone(),
-                        };
-                        drop(map);  // libère le lock avant le send
-                        let _ = socket.send_msg(&msg, *src_addr).await;
-                        println!("->({})", msg);                
-                        println!("{}", msg);
-                    } else {
-                        eprintln!("Peer {} not found", peer_id);
-                    }
-                }
+        // Relaie le message si c'est un message à relayer
+        if let Message::Classic { dst_addr, .. } = &msg {
+            if public_addr != *dst_addr {
+                relay_message(&connected_peers_clone, sender_addr, msg.clone(), &socket).await;
             }
-            Err(e) => eprintln!("[ERROR]: a message contain an error ({})", e),
+        }
+
+        // Fait le pont entre deux noeuds
+        if let Message::Connect { dst_addr, dst_id, .. } = &msg {
+            let map = connected_peers_clone.lock().await;  // lock d'abord
+            if map.contains_key(dst_addr) {
+                drop(map);  // libère le lock avant le send
+                let _ = socket.send_msg(&msg, *dst_addr).await;
+                println!("->({})", msg);
+                println!("Sent to {}: '{}'", dst_addr, msg);
+            } else {
+                eprintln!("Peer {} ({}) is unknown", dst_addr, dst_id);
+            }
+        }
+
+        // Ce relais a un nouveau client qui veut se connecter -> hole punching
+        if let Message::RelayHasNewClient { peer_addr, peer_id, time, .. } = &msg {           
+            connected_peers_clone.lock().await
+                .entry(sender_addr)  // La clé existe-t-elle déjà ?
+                .and_modify(|(_, t)| *t = *time)
+                .or_insert((peer_id.clone(), *time));
+            let msg = Message::PunchTheHole {
+                src_addr: public_addr,
+                src_id: peer_id.clone(),
+                dst_addr: *peer_addr,
+                dst_id: peer_id.to_string(),
+                time: now_secs(),
+            };
+            let _ = socket.send_msg(&msg, *peer_addr).await;
+            println!("->({})", msg);
+            
+        }
+
+        // Répond aux demandes d'informations
+        if let Message::AskForAddr { src_addr, peer_id, .. } = &msg {
+            let map = connected_peers_clone.lock().await;  // lock d'abord
+            if let Some((found_addr, _)) = map.iter().find(|(_, (id, _))| id == peer_id) {
+                let msg = Message::PeerInfo {
+                    peer_addr: *found_addr,
+                    peer_id: peer_id.clone(),
+                };
+                drop(map);  // libère le lock avant le send
+                let _ = socket.send_msg(&msg, *src_addr).await;
+                println!("->({})", msg);                
+                println!("{}", msg);
+            } else {
+                eprintln!("Peer {} not found", peer_id);
+            }
         }
     }
 }
@@ -202,155 +195,3 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 pub async fn user_only(socket: UdpSocket, public_addr: SocketAddr, peer_id: String) {
         
 }
-
-
-// // ==================== MODE LISTEN ====================
-// async fn listen_mode(socket: UdpSocket, relay_addr: SocketAddr, public_addr: SocketAddr, peer_id: String) {
-//     // Étape 1 : Écouter jusqu'à recevoir l'adresse/id du peer Dial via le relai
-//     println!("Waiting for the dial's address (LISTEN MODE)...");
-//     let (dial_peer_addr, dial_peer_id) = loop {
-//         // Récupération des message reçu
-//         let Some((msg, _)) = recv_msg(&socket).await else { return };
-//         if let Message::Connect {src_addr, src_id, ..} = &msg {
-//             println!("Received dial peer address {} ({}) from:\n    {}", *src_addr, src_id.clone(), msg);
-//             break (*src_addr, src_id.clone());
-//         }
-//         println!("'{}'", msg);
-//     };
-    
-//     // Étape 2 : Hole Punching (envoyer un message au DIAL même s'il va 
-//     // certainement être intercepté par le NAT de ce dernier)
-//     let msg = Message::Classic {
-//         src_addr: public_addr,
-//         src_id: peer_id.clone(),
-//         dst_addr: dial_peer_addr,
-//         dst_id: dial_peer_id.clone(),
-//         time: now_secs(),
-//         txt: "Hello dial, I am punching you, sorry".to_string(),
-//     };
-//     let _ = socket.send_msg(&msg, dial_peer_addr).await.unwrap();
-//     println!("Sent '{}' to dial", msg);
-
-//     // Étape 3 : Annoncer au dial qu'on est prêt à recevoir
-//     let msg = Message::Classic {
-//         src_addr: public_addr,
-//         dst_addr: dial_peer_addr,
-//         src_id: peer_id.clone(),
-//         dst_id: dial_peer_id.clone(),
-//         time: now_secs(),
-//         txt: "Hello dial, I am waiting for your direct connection".to_string(),
-//     };
-//     let _ = socket.send_msg(&msg, relay_addr).await.unwrap();
-//     println!("Sent '{}' to relay", msg);
-    
-//     // Étape 4 : Test de connexion directe (reception)
-//     let timeout_result = timeout(Duration::from_secs(5), async { 
-//         loop {
-//             // Récupération des messages reçus
-//             let Some((msg, _)) = recv_msg(&socket).await else { return };
-
-//             if let Message::Classic {src_addr, src_id, ..} = &msg {
-//                 if *src_addr == dial_peer_addr && src_id.clone() == dial_peer_id {  // Est-ce le dial ?
-//                     println!("[SUCCEED] We can receive messages from {}", dial_peer_addr);
-//                     break;
-//                 }
-//             }
-//             // Sinon, affichage du message reçu
-//             println!("{}", msg);
-//         }
-//     }).await;
-
-//     if timeout_result.is_err() {
-//         println!("[FAIL] We can not receive messages from {} (timeout)", dial_peer_addr);
-//     }
-
-//     // Étape 5 : Test de connexion directe (envoi)
-//     sleep(Duration::from_secs(3)).await;
-//     let msg = Message::Classic {
-//         src_addr: public_addr,
-//         dst_addr: dial_peer_addr,
-//         src_id: peer_id.clone(),
-//         dst_id: dial_peer_id.clone(),
-//         time: now_secs(),
-//         txt: "Hello dial, it is a direct connection".to_string(),
-//     };
-//     let _ = socket.send_msg(&msg, dial_peer_addr).await.unwrap();
-//     println!("Sent '{}' to dial", msg);
-
-//     return;
-// }
-
-// // ==================== MODE DIAL ====================
-// async fn dial_mode(socket: UdpSocket, relay_addr: SocketAddr, public_addr: SocketAddr, peer_id: String, listen_peer_id: String) {
-//     // Étape 0 : Demander au relai les informations sur le listen
-//     println!("\nInitiating connection to {} (DIAL MODE)...", listen_peer_id);
-//     let msg = Message::AskForAddr {
-//         src_addr: public_addr,
-//         src_id: peer_id.clone(),
-//         time: now_secs(),
-//         peer_id: listen_peer_id.clone(),
-//     };
-//     let _ = socket.send_msg(&msg, relay_addr).await.unwrap();
-//     println!("Sent '{}' to relay", msg);
-    
-//     // Étape 1 : Recevoir l'adresse du peer Listen via le relai
-//     let listen_peer_addr: SocketAddr = loop { 
-//         // Récupération des message reçu
-//         let Some((msg, _)) = recv_msg(&socket).await else { return };
-
-//         if let Message::PeerInfo { peer_addr, peer_id, .. } = &msg {
-//             if peer_id.clone() == listen_peer_id.clone() {
-//                 println!("{}", msg);
-//                 break *peer_addr;
-//             }
-//         } else {
-//             println!("Received a message:\n    {}", msg);
-//         }
-//     };
-
-//     // Étape 2 : Demander au relai de nous connecter au peer Listen
-//     let msg = Message::Connect {
-//         src_addr: public_addr,
-//         src_id: peer_id.clone(),
-//         dst_addr: listen_peer_addr,
-//         dst_id: listen_peer_id.clone(),
-//         time: now_secs(),
-//     };
-//     let _ = socket.send_msg(&msg, relay_addr).await.unwrap();
-//     println!("Sent '{}' to relay", msg);
-
-//     // Étape 3 : Test de connexion directe (envoi)
-//     sleep(Duration::from_secs(1)).await;
-//     let msg = Message::Classic {
-//         src_addr: public_addr,
-//         src_id: peer_id.clone(),
-//         dst_addr: listen_peer_addr,
-//         dst_id: listen_peer_id.clone(),
-//         time: now_secs(),
-//         txt: "Hello listen, it is a direct connection".to_string(),
-//     };
-//     socket.send_msg(&msg, listen_peer_addr).await.unwrap();
-//     println!("Sent '{}' to relay", msg);
-
-//     // Étape 4 : Test de connexion directe (reception)
-//     let timeout_result = timeout(Duration::from_secs(10), async { 
-//         loop {
-//             // Récupération des messages reçus
-//             let Some((msg, _)) = recv_msg(&socket).await else { return };
-
-//             if let Message::Classic {src_addr, ..} = &msg {
-//                 if *src_addr == listen_peer_addr {  // Est-ce le dial ?
-//                     println!("[SUCCEED] We can receive messages from {}", listen_peer_addr);
-//                     break;
-//                 }
-//             }
-//             // Sinon, affichage du message reçu
-//             println!("{}", msg);
-//         }
-//     }).await;
-
-//     if timeout_result.is_err() {
-//         println!("[FAIL] We can not receive messages from {} (timeout)", listen_peer_addr);
-//     }
-//     return;
-// }
