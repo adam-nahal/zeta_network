@@ -80,20 +80,6 @@ pub async fn main_client(peer_id: String, hubRelay_addr: SocketAddr) {
             user_only(socket, public_addr, peer_id).await;
         }
     }
-
-    // match opts.mode {
-    //     Mode::Listen => {
-    //         listen_mode(socket, relay_addr, public_addr, peer_id.clone()).await;
-    //     }
-    //     Mode::Dial => {
-    //         dial_mode(
-    //             socket, relay_addr, 
-    //             public_addr, peer_id,
-    //             opts.listen_peer_id.expect("--listen-peer-id required").parse().expect("Wrong address format"),
-    //             ).await;
-    //     }
-    //     _ => unreachable!()
-    // }
 }
 
 pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id: String) {
@@ -109,7 +95,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
     let peers_cleanup = Arc::clone(&peers_list);
     tokio::spawn(async move {
         loop {
-            sleep(Duration::from_secs(30)).await;
+            sleep(Duration::from_secs(10)).await;
             delete_disconnected_peers(&peers_cleanup).await;
         }
     });
@@ -146,8 +132,25 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
                         let _ = socket.send_msg(&msg, *dst_addr).await;
                         println!("Sent to {}: '{}'", dst_addr, msg);
                     } else {
-                        eprintln!("Peer {} ({}) is logged out", dst_addr, dst_id);
+                        eprintln!("Peer {} ({}) is unknown", dst_addr, dst_id);
                     }
+                }
+
+                // Ce relais a un nouveau client qui veut se connecter -> hole punching
+                if let Message::RelayHasNewClient { src_addr, src_id, time, .. } = &msg {           
+                    connected_peers_clone.lock().await
+                        .entry(sender_addr)  // La clé existe-t-elle déjà ?
+                        .and_modify(|(_, t)| *t = *time)
+                        .or_insert((src_id.clone(), *time));
+                    let msg = Message::PunchTheHole {
+                    src_addr: public_addr,
+                    src_id: peer_id.clone(),
+                    dst_addr: *src_addr,
+                    dst_id: src_id.to_string(),
+                    time: now_secs(),
+                    };
+                    let _ = socket.send_msg(&msg, *src_addr).await;
+                    
                 }
 
                 // Répond aux demandes d'informations

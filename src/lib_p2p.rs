@@ -94,6 +94,14 @@ pub enum Message {
         time: u64,
     },
 
+    PunchTheHole {
+        src_addr: SocketAddr,
+        src_id: String,
+        dst_addr: SocketAddr,
+        dst_id: String,
+        time: u64,
+    },
+
     Ack {
         src_addr: SocketAddr,
         src_id: String,
@@ -169,6 +177,12 @@ impl fmt::Display for Message {
                 write!(f, "[RelayHasNewClient] {} ({}) wants to connect to relay {} ({}) ({})", peer_addr, peer_id, src_addr, src_id, time_str)
             }
             Message::NoRelayAvailable { src_addr, src_id, dst_addr, dst_id, time } => {
+                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
+                    .map(|dt| dt.format("%H:%M:%S").to_string())
+                    .unwrap_or_else(|| format!("t={}", time));
+                write!(f, "[NoRelayAvailable] [{} ({}) → {} ({})] ({})", src_addr, src_id, dst_addr, dst_id, time_str)
+            }
+            Message::PunchTheHole { src_addr, src_id, dst_addr, dst_id, time } => {
                 let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
                     .map(|dt| dt.format("%H:%M:%S").to_string())
                     .unwrap_or_else(|| format!("t={}", time));
