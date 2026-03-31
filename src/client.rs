@@ -73,7 +73,7 @@ pub async fn main_client(peer_id: String, hubRelay_addr: SocketAddr) {
     match nat_type {
         OpenInternet | FullCone | RestrictedCone | PortRestrictedCone => {
             println!("This node is become a relay ({:?})", nat_type);
-            user_and_relay(socket, public_addr, peer_id).await;
+            user_and_relay(socket, public_addr, peer_id, hubRelay_addr).await;
         }
         _ => {  // SymmetricUdpFirewall or Symmetric
             println!("This node can't be a relay ({:?})", nat_type);
@@ -82,7 +82,7 @@ pub async fn main_client(peer_id: String, hubRelay_addr: SocketAddr) {
     }
 }
 
-pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id: String) {
+pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id: String, hubRelay_addr: SocketAddr) {
     // Le relay démarre l'écoute
     let socket = UdpSocket::bind("0.0.0.0:0").await.expect("Failed to bind");
     let public_addr: SocketAddr = get_public_ip(&socket).await.expect("Public IP not obtained.");
@@ -99,6 +99,24 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
             delete_disconnected_peers(&peers_cleanup).await;
         }
     });
+
+    // S'enregistre auprès du hubrelay en tant que relay
+    println!("Asking the hub relay to be relay...");
+    let msg = Message::BeNewRelay {
+        src_addr: public_addr,
+        src_id: peer_id.clone(),
+        time: now_secs(),
+    };
+    let _ = socket.send_msg(&msg, hubRelay_addr).await;  
+    loop {
+        let Some((msg, _)) = recv_msg(&socket).await else { return };
+        match &msg {
+            Message::Ack { src_addr, src_id, .. } => {
+                println!("Ack from {} ({})", src_addr, src_id);
+            }
+            _ => println!("Unexpected message: '{}'", msg),
+        }
+    }    
 
     let mut buf = vec![0; 1024];
     loop {
