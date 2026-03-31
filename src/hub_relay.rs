@@ -53,7 +53,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
                         // On accuse réception
                         let ack = Message::Ack {
                             src_addr: public_addr,
-                            src_id: public_addr.to_string(),
+                            src_id: src_id.clone(),
                             time: now_secs(),
                         };
                         let _ = socket.send_msg(&ack, sender_addr).await;

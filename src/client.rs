@@ -163,11 +163,11 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
                         .and_modify(|(_, t)| *t = *time)
                         .or_insert((src_id.clone(), *time));
                     let msg = Message::PunchTheHole {
-                    src_addr: public_addr,
-                    src_id: peer_id.clone(),
-                    dst_addr: *src_addr,
-                    dst_id: src_id.to_string(),
-                    time: now_secs(),
+                        src_addr: public_addr,
+                        src_id: peer_id.clone(),
+                        dst_addr: *src_addr,
+                        dst_id: src_id.to_string(),
+                        time: now_secs(),
                     };
                     let _ = socket.send_msg(&msg, *src_addr).await;
                     println!("->({})", msg);
