@@ -8,12 +8,12 @@ use std::net::SocketAddr;
 use crate::lib_p2p::*;
 
 
-pub async fn main_hubRelay(peer_id: String, hubRelay_addr: SocketAddr) {
+pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
     // Le hub relay démarre l'écoute
     let socket = UdpSocket::bind("0.0.0.0:55555").await.expect("Failed to bind");
     let public_addr: SocketAddr = get_public_ip(&socket).await.expect("Public IP not obtained.");
     println!("\nThe hub relay listens on {} ({})...", public_addr, peer_id);
-    if hubRelay_addr != public_addr {
+    if hub_relay_addr != public_addr {
     	println!("[ERROR] The hub relay has an address different as expected");
     	return;
     }
@@ -40,7 +40,7 @@ pub async fn main_hubRelay(peer_id: String, hubRelay_addr: SocketAddr) {
     				continue; // passer au message suivant
 				}
                 let msg: Message = bincode::deserialize(&buf[..size]).expect("[ERROR] Deserialization failed");
-                println!("{}", msg);
+                println!("<-{}", msg);
 				
 				match &msg {
                     // Un relai se déclare : on l'ajoute/met à jour dans la map
@@ -57,19 +57,19 @@ pub async fn main_hubRelay(peer_id: String, hubRelay_addr: SocketAddr) {
                             time: now_secs(),
                         };
                         let _ = socket.send_msg(&ack, sender_addr).await;
-                        println!("{}", ack);
+                        println!("->{}", ack);
                     }
 
                     // Un peer cherche un relai : on lui en renvoie un
                     Message::NeedRelay { src_addr, src_id, .. } => {
                         let relays = relays_list.lock().await;
-                        if let Some((relay_addr, _)) = relays.iter().next() {
+                        if let Some((relay_addr, (relay_id, _))) = relays.iter().next() {
                             let msg = Message::PeerInfo {
                                 peer_addr: *relay_addr,
-                                peer_id: "".to_string(),
+                                peer_id: relay_id.to_string(),
                             };
                             let _ = socket.send_msg(&msg, *src_addr).await;
-                            println!("{}", msg);
+                            println!("->{}", msg);
 
                             // Avertissons le relais concerné
                             let msg = Message::RelayHasNewClient {
@@ -80,7 +80,7 @@ pub async fn main_hubRelay(peer_id: String, hubRelay_addr: SocketAddr) {
                             	time: now_secs(),
                             };
                             let _ = socket.send_msg(&msg, *relay_addr).await;
-                            println!("{}", msg);
+                            println!("->{}", msg);
                         } else {
                             let msg = Message::NoRelayAvailable {
 	                            src_addr: public_addr,
@@ -90,7 +90,7 @@ pub async fn main_hubRelay(peer_id: String, hubRelay_addr: SocketAddr) {
                             	time: now_secs(),
                             };
                             let _ = socket.send_msg(&msg, *src_addr).await;
-                            println!("{}", msg);
+                            println!("->{}", msg);
                         }
                     }
 

@@ -11,7 +11,7 @@ use crate::nat_detector::util::NatType::*;
 use crate::lib_p2p::*;
 
 
-pub async fn main_client(peer_id: String, hubRelay_addr: SocketAddr) {
+pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {
     // Initialisation du noeud
     println!("\nLooking for NAT type...");
     let (nat_type, _) = nat_detector().await
@@ -37,7 +37,8 @@ pub async fn main_client(peer_id: String, hubRelay_addr: SocketAddr) {
         src_id: peer_id.clone(),
         time: now_secs(),
     };
-    let _ = socket.send_msg(&msg, hubRelay_addr).await;  
+    let _ = socket.send_msg(&msg, hub_relay_addr).await;
+    println!("->({})", msg);
 
     // Attends l'adresse d'un relais, de la part du hub relais
     let relay_addr: Option<SocketAddr> = loop {
@@ -65,6 +66,7 @@ pub async fn main_client(peer_id: String, hubRelay_addr: SocketAddr) {
             time: now_secs(),
         };
         let _ = socket.send_msg(&msg, relay_addr).await;
+        println!("->({})", msg);
     } else {
         println!("[WARN] No relay, skipping registration");
     }
@@ -73,7 +75,7 @@ pub async fn main_client(peer_id: String, hubRelay_addr: SocketAddr) {
     match nat_type {
         OpenInternet | FullCone | RestrictedCone | PortRestrictedCone => {
             println!("This node is become a relay ({:?})", nat_type);
-            user_and_relay(socket, public_addr, peer_id, hubRelay_addr).await;
+            user_and_relay(socket, public_addr, peer_id, hub_relay_addr).await;
         }
         _ => {  // SymmetricUdpFirewall or Symmetric
             println!("This node can't be a relay ({:?})", nat_type);
@@ -82,12 +84,7 @@ pub async fn main_client(peer_id: String, hubRelay_addr: SocketAddr) {
     }
 }
 
-pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id: String, hubRelay_addr: SocketAddr) {
-    // Le relay démarre l'écoute
-    let socket = UdpSocket::bind("0.0.0.0:0").await.expect("Failed to bind");
-    let public_addr: SocketAddr = get_public_ip(&socket).await.expect("Public IP not obtained.");
-    println!("\nListening on {}...", public_addr);
-
+pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id: String, hub_relay_addr: SocketAddr) {
     // Crée la liste de tous les clients qui ont contacté ce relai
     let peers_list: PeersMap = Arc::new(Mutex::new(HashMap::new()));
 
@@ -107,12 +104,14 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
         src_id: peer_id.clone(),
         time: now_secs(),
     };
-    let _ = socket.send_msg(&msg, hubRelay_addr).await;  
+    let _ = socket.send_msg(&msg, hub_relay_addr).await;  
+    println!("->({})", msg);
     loop {
         let Some((msg, _)) = recv_msg(&socket).await else { return };
         match &msg {
             Message::Ack { src_addr, src_id, .. } => {
                 println!("Ack from {} ({})", src_addr, src_id);
+                break;
             }
             _ => println!("Unexpected message: '{}'", msg),
         }
@@ -148,6 +147,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
                     if map.contains_key(dst_addr) {
                         drop(map);  // libère le lock avant le send
                         let _ = socket.send_msg(&msg, *dst_addr).await;
+                        println!("->({})", msg);
                         println!("Sent to {}: '{}'", dst_addr, msg);
                     } else {
                         eprintln!("Peer {} ({}) is unknown", dst_addr, dst_id);
@@ -168,6 +168,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
                     time: now_secs(),
                     };
                     let _ = socket.send_msg(&msg, *src_addr).await;
+                    println!("->({})", msg);
                     
                 }
 
@@ -181,6 +182,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
                         };
                         drop(map);  // libère le lock avant le send
                         let _ = socket.send_msg(&msg, *src_addr).await;
+                        println!("->({})", msg);                
                         println!("{}", msg);
                     } else {
                         eprintln!("Peer {} not found", peer_id);
