@@ -170,11 +170,11 @@ impl fmt::Display for Message {
                     .unwrap_or_else(|| format!("t={}", time));
                 write!(f, "[Ack] {} ({}) ({})", src_addr, src_id, time_str)
             }
-            Message::RelayHasNewClient { peer_addr, peer_id, src_addr, src_id, time } => {
+            Message::RelayHasNewClient { peer_addr, peer_id, time, .. } => {
                 let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
                     .map(|dt| dt.format("%H:%M:%S").to_string())
                     .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[RelayHasNewClient] {} ({}) wants to connect to relay {} ({}) ({})", peer_addr, peer_id, src_addr, src_id, time_str)
+                write!(f, "[RelayHasNewClient] {} ({}) wants to connect to you, relay ({})", peer_addr, peer_id, time_str)
             }
             Message::NoRelayAvailable { src_addr, src_id, dst_addr, dst_id, time } => {
                 let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)

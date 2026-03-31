@@ -43,6 +43,7 @@ pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {
     // Attends l'adresse d'un relais, de la part du hub relais
     let relay_addr: Option<SocketAddr> = loop {
         let Some((msg, _)) = recv_msg(&socket).await else { return };
+        println!("<-({})", msg);
         match &msg {
             Message::PeerInfo { peer_addr, peer_id, .. } => {
                 println!("Received relay address {} ({})", peer_addr, peer_id);
@@ -108,6 +109,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
     println!("->({})", msg);
     loop {
         let Some((msg, _)) = recv_msg(&socket).await else { return };
+        println!("<-{}", msg);
         match &msg {
             Message::Ack { src_addr, src_id, .. } => {
                 println!("Ack from {} ({})", src_addr, src_id);
