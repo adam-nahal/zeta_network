@@ -41,29 +41,32 @@ pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {
     println!("->({})", msg);
 
     // Attends l'adresse d'un relais, de la part du hub relais
-    let relay_addr: Option<SocketAddr> = loop {
+    let (mut relay_addr, mut relay_id) = (None, None);
+    loop {
         let Some((msg, _)) = recv_msg(&socket).await else { return };
         println!("<-({})", msg);
         match &msg {
             Message::PeerInfo { peer_addr, peer_id, .. } => {
                 println!("Received relay address {} ({})", peer_addr, peer_id);
-                break Some(*peer_addr);
+	            relay_addr = Some(*peer_addr);
+	            relay_id = Some(peer_id.clone());
+                break;
             }
             Message::NoRelayAvailable { .. } => {
                 println!("[WARN] No relays available on the network");
-                break None;
+                break;
             }
             _ => println!("Unexpected message: '{}'", msg),
         }
     };
 
     // Envoi du premier message au relais
-    if let Some(relay_addr) = relay_addr {
+    if let (Some(relay_addr), Some(relay_id)) = (relay_addr, relay_id) {
         let msg = Message::Register {
             src_addr: public_addr,
             src_id: peer_id.clone(),
             dst_addr: relay_addr,
-            dst_id: "relay1".to_string(),
+            dst_id: relay_id.clone(),
             time: now_secs(),
         };
         let _ = socket.send_msg(&msg, relay_addr).await;

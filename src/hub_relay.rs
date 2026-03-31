@@ -12,7 +12,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
     // Le hub relay démarre l'écoute
     let socket = UdpSocket::bind("0.0.0.0:55555").await.expect("Failed to bind");
     let public_addr: SocketAddr = get_public_ip(&socket).await.expect("Public IP not obtained.");
-    println!("\nThe hub relay listens on {} ({})...", public_addr, peer_id);
+    println!("\nThe hub relay listens on {} as {}...", public_addr, peer_id);
     if hub_relay_addr != public_addr {
     	println!("[ERROR] The hub relay has an address different as expected");
     	return;
