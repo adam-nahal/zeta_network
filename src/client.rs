@@ -43,7 +43,7 @@ pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {
     // Attends l'adresse d'un relais, de la part du hub relais
     let (mut relay_addr, mut relay_id) = (None, None);
     loop {
-        let Some((msg, _)) = recv_msg(&socket).await else { return };
+        let Some((msg, _)) = recv_msg(&socket).await else { continue };
         println!("<-({})", msg);
         match &msg {
             Message::PeerInfo { peer_addr, peer_id, .. } => {
@@ -71,6 +71,11 @@ pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {
         };
         let _ = socket.send_msg(&msg, relay_addr).await;
         println!("->({})", msg);
+        
+		if !wait_for_ack(&socket).await {
+		    println!("[ERROR] No ack from relay, aborting");
+		    return;
+		} 
     } else {
         println!("[WARN] No relay, skipping registration");
     }
@@ -110,17 +115,11 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
     };
     let _ = socket.send_msg(&msg, hub_relay_addr).await;  
     println!("->({})", msg);
-    loop {
-        let Some((msg, _)) = recv_msg(&socket).await else { return };
-        println!("<-{}", msg);
-        match &msg {
-            Message::Ack { src_addr, src_id, .. } => {
-                println!("Ack from {} ({})", src_addr, src_id);
-                break;
-            }
-            _ => println!("Unexpected message: '{}'", msg),
-        }
-    }    
+
+    if !wait_for_ack(&socket).await {
+	    println!("[ERROR] No ack from relay, aborting");
+	    return;
+	}   
 
     loop {
     	let Some((msg, sender_addr)) = recv_msg(&socket).await else {continue};
@@ -156,7 +155,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
         }
 
         // Ce relais a un nouveau client qui veut se connecter -> hole punching
-        if let Message::RelayHasNewClient { peer_addr, peer_id, time, .. } = &msg {           
+        if let Message::RelayHasNewClient { peer_addr, peer_id: client_id, time, .. } = &msg {           
             connected_peers_clone.lock().await
                 .entry(sender_addr)  // La clé existe-t-elle déjà ?
                 .and_modify(|(_, t)| *t = *time)
@@ -165,7 +164,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
                 src_addr: public_addr,
                 src_id: peer_id.clone(),
                 dst_addr: *peer_addr,
-                dst_id: peer_id.to_string(),
+                dst_id: client_id.to_string(),
                 time: now_secs(),
             };
             let _ = socket.send_msg(&msg, *peer_addr).await;

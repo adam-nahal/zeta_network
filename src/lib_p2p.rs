@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 pub type PeersMap = Arc<Mutex<HashMap<SocketAddr, (String, u64)>>>; // un noeud = [Addr, (pseudo, derniere connection en secs)]
+pub const MAX_PACKET_SIZE: usize = 4096;
 
 #[derive(Debug, Parser, Clone)]
 pub struct Opts {
@@ -126,67 +127,37 @@ impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Message::Register { src_addr, src_id, dst_addr, dst_id, time } => {
-                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
-                    .map(|dt| dt.format("%H:%M:%S").to_string())
-                    .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[Register] {} ({}) → {} ({}) ({})", src_addr, src_id, dst_addr, dst_id, time_str)
+                write!(f, "[Register] {} ({}) → {} ({}) ({})", src_addr, src_id, dst_addr, dst_id, fmt_time(*time))
             }
             Message::Connect { src_addr, src_id, dst_id, dst_addr, time } => {
-                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
-                    .map(|dt| dt.format("%H:%M:%S").to_string())
-                    .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[Connect] {} ({}) → {} ({}) ({})", src_addr, src_id, dst_addr, dst_id, time_str)
+                write!(f, "[Connect] {} ({}) → {} ({}) ({})", src_addr, src_id, dst_addr, dst_id, fmt_time(*time))
             }
             Message::AskForAddr { src_addr, src_id, peer_id, time } => {
-                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
-                    .map(|dt| dt.format("%H:%M:%S").to_string())
-                    .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[AskForAddr] {} ({}) asks for {}'s addr ({})", *src_addr, src_id, peer_id, time_str)
+                write!(f, "[AskForAddr] {} ({}) asks for {}'s addr ({})", *src_addr, src_id, peer_id, fmt_time(*time))
             }
             Message::PeerInfo { peer_addr, peer_id } => {
                 write!(f, "[PeerInfo] {} ({})", peer_addr, peer_id)
             }
             Message::Classic { src_addr, src_id, dst_addr, dst_id, txt, time } => {
-                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
-                    .map(|dt| dt.format("%H:%M:%S").to_string())
-                    .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[{} ({}) → {} ({})] \"{}\" ({})", src_addr, src_id, dst_addr, dst_id, txt, time_str)
+                write!(f, "[{} ({}) → {} ({})] \"{}\" ({})", src_addr, src_id, dst_addr, dst_id, txt, fmt_time(*time))
             }
             Message::BeNewRelay { src_addr, src_id, time } => {
-                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
-                    .map(|dt| dt.format("%H:%M:%S").to_string())
-                    .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[BeNewRelay] {} ({}) ({})", src_addr, src_id, time_str)
+                write!(f, "[BeNewRelay] {} ({}) ({})", src_addr, src_id, fmt_time(*time))
             }
             Message::NeedRelay { src_addr, src_id, time } => {
-                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
-                    .map(|dt| dt.format("%H:%M:%S").to_string())
-                    .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[NeedRelay] {} ({}) ({})", src_addr, src_id, time_str)
+                write!(f, "[NeedRelay] {} ({}) ({})", src_addr, src_id, fmt_time(*time))
             }
             Message::Ack { src_addr, src_id, time } => {
-                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
-                    .map(|dt| dt.format("%H:%M:%S").to_string())
-                    .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[Ack] {} ({}) ({})", src_addr, src_id, time_str)
+                write!(f, "[Ack] {} ({}) ({})", src_addr, src_id, fmt_time(*time))
             }
             Message::RelayHasNewClient { peer_addr, peer_id, time, .. } => {
-                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
-                    .map(|dt| dt.format("%H:%M:%S").to_string())
-                    .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[RelayHasNewClient] {} ({}) wants to connect to you, relay ({})", peer_addr, peer_id, time_str)
+                write!(f, "[RelayHasNewClient] {} ({}) wants to connect to you, relay ({})", peer_addr, peer_id, fmt_time(*time))
             }
             Message::NoRelayAvailable { src_addr, src_id, dst_addr, dst_id, time } => {
-                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
-                    .map(|dt| dt.format("%H:%M:%S").to_string())
-                    .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[NoRelayAvailable] [{} ({}) → {} ({})] ({})", src_addr, src_id, dst_addr, dst_id, time_str)
+                write!(f, "[NoRelayAvailable] [{} ({}) → {} ({})] ({})", src_addr, src_id, dst_addr, dst_id, fmt_time(*time))
             }
             Message::PunchTheHole { src_addr, src_id, dst_addr, dst_id, time } => {
-                let time_str = DateTime::<Utc>::from_timestamp(*time as i64, 0)
-                    .map(|dt| dt.format("%H:%M:%S").to_string())
-                    .unwrap_or_else(|| format!("t={}", time));
-                write!(f, "[PunchTheHole] [{} ({}) → {} ({})] ({})", src_addr, src_id, dst_addr, dst_id, time_str)
+                write!(f, "[PunchTheHole] [{} ({}) → {} ({})] ({})", src_addr, src_id, dst_addr, dst_id, fmt_time(*time))
             }
         }
     }
@@ -204,14 +175,19 @@ pub async fn get_public_ip(socket: &UdpSocket) -> Result<SocketAddr> {
 }
 
 pub async fn recv_msg(socket: &UdpSocket) -> Option<(Message, SocketAddr)> {
-    let mut buf = [0; 1024];
+    let mut buf = [0; MAX_PACKET_SIZE];
     let (size, sender_addr) = socket.recv_from(&mut buf).await.expect("Nothing received");
-    if size == 0 || size >= 1024 {
+    if size == 0 || size >= MAX_PACKET_SIZE {
         println!("The message's size is incorrect({})", size);
         return None;
+    }    
+    match bincode::deserialize(&buf[..size]) {
+        Ok(msg) => Some((msg, sender_addr)),
+        Err(e) => {
+            eprintln!("[WARN] Deserialization failed from {}: {}", sender_addr, e);
+            None
+        }
     }
-    let msg: Message = bincode::deserialize(&buf[..size]).expect("[ERROR] Deserialization failed");
-    Some((msg, sender_addr))
 }
 
 pub fn now_secs() -> u64 {
@@ -242,4 +218,23 @@ pub async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, msg: Messa
             }
         }
     }
+}
+
+pub async fn wait_for_ack(socket: &UdpSocket) -> bool {
+    loop {
+        let Some((msg, _)) = recv_msg(socket).await else { return false };
+        match &msg {
+            Message::Ack { src_addr, src_id, .. } => {
+                println!("Ack from {} ({})", src_addr, src_id);
+                return true;
+            }
+            _ => println!("Unexpected message: '{}'", msg),
+        }
+    }
+}
+
+fn fmt_time(time: u64) -> String {
+    DateTime::<Utc>::from_timestamp(time as i64, 0)
+        .map(|dt| dt.format("%H:%M:%S").to_string())
+        .unwrap_or_else(|| format!("t={}", time))
 }
