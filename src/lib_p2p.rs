@@ -1,7 +1,7 @@
 use std::fmt;
 use tokio::net::UdpSocket;
 use std::net::{SocketAddr, ToSocketAddrs};
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand};
 use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
 use anyhow::Result;
@@ -10,22 +10,23 @@ use tokio::time::{sleep, Duration};
 use std::sync::Arc;
 use std::collections::HashMap;
 
+
 pub type PeersMap = Arc<Mutex<HashMap<SocketAddr, (String, u64)>>>; // un noeud = [Addr, (pseudo, derniere connection en secs)]
 pub const MAX_PACKET_SIZE: usize = 4096;
 
-#[derive(Debug, Parser, Clone)]
+#[derive(Debug, Parser)]
 pub struct Opts {
-    #[arg(long, value_enum)]
+    #[command(subcommand)]
     pub mode: Mode,
-
-    #[arg(long)]
-    pub peer_id: String
 }
 
-#[derive(Clone, Debug, PartialEq, ValueEnum)]
+#[derive(Debug, Subcommand)]
 pub enum Mode {
-    Client,
-    HubRelay
+    Client {
+        #[arg(long)]
+        peer_id: String,
+    },
+    HubRelay,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
