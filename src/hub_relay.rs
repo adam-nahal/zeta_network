@@ -55,7 +55,10 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
             // Un peer cherche un relai : on lui en renvoie un
             Message::NeedRelay { src_addr, src_id, .. } => {
                 let relays = relays_list.lock().await;
-                if let Some((relay_addr, (relay_id, _))) = relays.iter().next() {
+                let chosen_relay = relays
+			        .iter()
+			        .find(|(addr, _)| *addr != src_addr);
+                if let Some((relay_addr, (relay_id, _))) = chosen_relay {
                     let msg = Message::PeerInfo {
                         peer_addr: *relay_addr,
                         peer_id: relay_id.to_string(),

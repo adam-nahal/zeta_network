@@ -6,6 +6,7 @@ use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
 use anyhow::Result;
 use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration};
 use std::sync::Arc;
 use std::collections::HashMap;
 
@@ -232,6 +233,53 @@ pub async fn wait_for_ack(socket: &UdpSocket) -> bool {
         }
     }
 }
+
+pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, peer_id: &str, hub_relay_addr: SocketAddr) -> Option<(SocketAddr, String)> {
+    // Demande un relais jusqu'à en obtenir un
+    let (relay_addr, relay_id) = loop {
+        println!("Asking the hub relay an available relay...");
+        let msg = Message::NeedRelay {
+            src_addr: public_addr,
+            src_id: peer_id.to_string(),
+            time: now_secs(),
+        };
+        let _ = socket.send_msg(&msg, hub_relay_addr).await;
+        println!("->({})", msg);
+
+        let Some((msg, _)) = recv_msg(socket).await else { continue };
+        println!("<-({})", msg);
+        match &msg {
+            Message::PeerInfo { peer_addr, peer_id, .. } => {
+                println!("Received relay address {} ({})", peer_addr, peer_id);
+                break (*peer_addr, peer_id.clone());
+            }
+            Message::NoRelayAvailable { .. } => {
+                println!("[WARN] No relays available, retrying in 5s...");
+                sleep(Duration::from_secs(15)).await;
+            }
+            _ => println!("Unexpected message: '{}'", msg),
+        }
+    };
+
+    // Enregistrement auprès du relais
+    let msg = Message::Register {
+        src_addr: public_addr,
+        src_id: peer_id.to_string(),
+        dst_addr: relay_addr,
+        dst_id: relay_id.clone(),
+        time: now_secs(),
+    };
+    let _ = socket.send_msg(&msg, relay_addr).await;
+    println!("->({})", msg);
+
+    if !wait_for_ack(socket).await {
+        println!("[ERROR] No ack from relay, aborting");
+        return None;
+    }
+
+    Some((relay_addr, relay_id))
+}
+ 
 
 fn fmt_time(time: u64) -> String {
     DateTime::<Utc>::from_timestamp(time as i64, 0)

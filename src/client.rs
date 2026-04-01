@@ -1,9 +1,11 @@
 use tokio::net::UdpSocket;
-use tokio::time::{sleep, Duration, timeout};
+use tokio::time::{sleep, Duration};
 use std::net::SocketAddr;
 
 use tokio::sync::Mutex;
 use std::sync::Arc;
+use tokio::io::{stdin, AsyncBufReadExt, BufReader};
+use std::io::Write;
 use std::collections::HashMap;
 
 use crate::nat_detector::nat_detector;
@@ -30,56 +32,6 @@ pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {
         .expect("Public IP not obtained.");
     println!("Socket created on public address {:?}", public_addr);
 
-    // Demande un relais disponible au hubRelay
-    println!("Asking the hub relay an available relay...");
-    let msg = Message::NeedRelay {
-        src_addr: public_addr,
-        src_id: peer_id.clone(),
-        time: now_secs(),
-    };
-    let _ = socket.send_msg(&msg, hub_relay_addr).await;
-    println!("->({})", msg);
-
-    // Attends l'adresse d'un relais, de la part du hub relais
-    let (mut relay_addr, mut relay_id) = (None, None);
-    loop {
-        let Some((msg, _)) = recv_msg(&socket).await else { continue };
-        println!("<-({})", msg);
-        match &msg {
-            Message::PeerInfo { peer_addr, peer_id, .. } => {
-                println!("Received relay address {} ({})", peer_addr, peer_id);
-	            relay_addr = Some(*peer_addr);
-	            relay_id = Some(peer_id.clone());
-                break;
-            }
-            Message::NoRelayAvailable { .. } => {
-                println!("[WARN] No relays available on the network");
-                break;
-            }
-            _ => println!("Unexpected message: '{}'", msg),
-        }
-    };
-
-    // Envoi du premier message au relais
-    if let (Some(relay_addr), Some(relay_id)) = (relay_addr, relay_id) {
-        let msg = Message::Register {
-            src_addr: public_addr,
-            src_id: peer_id.clone(),
-            dst_addr: relay_addr,
-            dst_id: relay_id.clone(),
-            time: now_secs(),
-        };
-        let _ = socket.send_msg(&msg, relay_addr).await;
-        println!("->({})", msg);
-        
-		if !wait_for_ack(&socket).await {
-		    println!("[ERROR] No ack from relay, aborting");
-		    return;
-		} 
-    } else {
-        println!("[WARN] No relay, skipping registration");
-    }
-
     // Ajout de ce noeud au réseau Zeta Network
     match nat_type {
         OpenInternet | FullCone | RestrictedCone | PortRestrictedCone => {
@@ -94,6 +46,7 @@ pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {
 }
 
 pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id: String, hub_relay_addr: SocketAddr) {
+	let socket = Arc::new(socket);
     // Crée la liste de tous les clients qui ont contacté ce relai
     let peers_list: PeersMap = Arc::new(Mutex::new(HashMap::new()));
 
@@ -107,7 +60,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
     });
 
     // S'enregistre auprès du hubrelay en tant que relay
-    println!("Asking the hub relay to be relay...");
+    println!("Asking the hub relay to be a relay...");
     let msg = Message::BeNewRelay {
         src_addr: public_addr,
         src_id: peer_id.clone(),
@@ -119,78 +72,131 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
     if !wait_for_ack(&socket).await {
 	    println!("[ERROR] No ack from relay, aborting");
 	    return;
-	}   
+	}
 
-    loop {
-    	let Some((msg, sender_addr)) = recv_msg(&socket).await else {continue};
-    	println!("<-{}", msg);
+	// Demande au hub relais l'adresse d'un relais
+	let Some((relay_addr, _relay_id)) = connect_to_a_relay(&socket, public_addr, &peer_id, hub_relay_addr)
+		.await else {return};
 
-        // Ajout des nouveaux noeuds ou mise à jour de la dernière connection
-        let connected_peers_clone = Arc::clone(&peers_list);
-        if let Message::Register { src_id, time, .. } = &msg {
-            connected_peers_clone.lock().await
-                .entry(sender_addr)  // La clé existe-t-elle déjà ?
-                .and_modify(|(_, t)| *t = *time)
-                .or_insert((src_id.clone(), *time));
-        }
+	// Boucle de réception
+    let recv_socket = Arc::clone(&socket);
+    let recv_peers_list = Arc::clone(&peers_list);
+    let recv_peer_id = peer_id.clone();
+    tokio::spawn(async move {
+    	loop {
+	    	let Some((msg, sender_addr)) = recv_msg(&recv_socket).await else {continue};
+	    	println!("<-{}", msg);
 
-        // Relaie le message si c'est un message à relayer
-        if let Message::Classic { dst_addr, .. } = &msg {
-            if public_addr != *dst_addr {
-                relay_message(&connected_peers_clone, sender_addr, msg.clone(), &socket).await;
-            }
-        }
+	        // Ajout des nouveaux noeuds ou mise à jour de la dernière connection
+	        let connected_peers_clone = Arc::clone(&recv_peers_list);
+	        if let Message::Register { src_id, time, .. } = &msg {
+	            connected_peers_clone.lock().await
+	                .entry(sender_addr)  // La clé existe-t-elle déjà ?
+	                .and_modify(|(_, t)| *t = *time)
+	                .or_insert((src_id.clone(), *time));
+	        }
 
-        // Fait le pont entre deux noeuds
-        if let Message::Connect { dst_addr, dst_id, .. } = &msg {
-            let map = connected_peers_clone.lock().await;  // lock d'abord
-            if map.contains_key(dst_addr) {
-                drop(map);  // libère le lock avant le send
-                let _ = socket.send_msg(&msg, *dst_addr).await;
-                println!("->({})", msg);
-                println!("Sent to {}: '{}'", dst_addr, msg);
-            } else {
-                eprintln!("Peer {} ({}) is unknown", dst_addr, dst_id);
-            }
-        }
+	        // Relaie le message si c'est un message à relayer
+	        if let Message::Classic { dst_addr, .. } = &msg {
+	            if public_addr != *dst_addr {
+	                relay_message(&connected_peers_clone, sender_addr, msg.clone(), &recv_socket).await;
+	            }
+	        }
 
-        // Ce relais a un nouveau client qui veut se connecter -> hole punching
-        if let Message::RelayHasNewClient { peer_addr, peer_id: client_id, time, .. } = &msg {           
-            connected_peers_clone.lock().await
-                .entry(sender_addr)  // La clé existe-t-elle déjà ?
-                .and_modify(|(_, t)| *t = *time)
-                .or_insert((peer_id.clone(), *time));
-            let msg = Message::PunchTheHole {
-                src_addr: public_addr,
-                src_id: peer_id.clone(),
-                dst_addr: *peer_addr,
-                dst_id: client_id.to_string(),
-                time: now_secs(),
-            };
-            let _ = socket.send_msg(&msg, *peer_addr).await;
-            println!("->({})", msg);
-            
-        }
+	        // Fait le pont entre deux noeuds
+	        if let Message::Connect { dst_addr, dst_id, .. } = &msg {
+	            let map = connected_peers_clone.lock().await;  // lock d'abord
+	            if map.contains_key(dst_addr) {
+	                drop(map);  // libère le lock avant le send
+	                let _ = recv_socket.send_msg(&msg, *dst_addr).await;
+	                println!("->({})", msg);
+	                println!("Sent to {}: '{}'", dst_addr, msg);
+	            } else {
+	                eprintln!("Peer {} ({}) is unknown", dst_addr, dst_id);
+	            }
+	        }
 
-        // Répond aux demandes d'informations
-        if let Message::AskForAddr { src_addr, peer_id, .. } = &msg {
-            let map = connected_peers_clone.lock().await;  // lock d'abord
-            if let Some((found_addr, _)) = map.iter().find(|(_, (id, _))| id == peer_id) {
-                let msg = Message::PeerInfo {
-                    peer_addr: *found_addr,
-                    peer_id: peer_id.clone(),
-                };
-                drop(map);  // libère le lock avant le send
-                let _ = socket.send_msg(&msg, *src_addr).await;
-                println!("->({})", msg);                
-                println!("{}", msg);
-            } else {
-                eprintln!("Peer {} not found", peer_id);
-            }
-        }
-    }
+	        // Ce relais a un nouveau client qui veut se connecter -> hole punching
+	        if let Message::RelayHasNewClient { peer_addr, peer_id: client_id, time, .. } = &msg {           
+	            connected_peers_clone.lock().await
+	                .entry(sender_addr)  // La clé existe-t-elle déjà ?
+	                .and_modify(|(_, t)| *t = *time)
+	                .or_insert((recv_peer_id.clone(), *time));
+	            let msg = Message::PunchTheHole {
+	                src_addr: public_addr,
+	                src_id: recv_peer_id.clone(),
+	                dst_addr: *peer_addr,
+	                dst_id: client_id.to_string(),
+	                time: now_secs(),
+	            };
+	            let _ = recv_socket.send_msg(&msg, *peer_addr).await;
+	            println!("->({})", msg);
+	            
+	        }
+
+	        // Répond aux demandes d'informations
+	        if let Message::AskForAddr { src_addr, peer_id, .. } = &msg {
+	            let map = connected_peers_clone.lock().await;  // lock d'abord
+	            if let Some((found_addr, _)) = map.iter().find(|(_, (id, _))| *id == *peer_id) {
+	                let msg = Message::PeerInfo {
+	                    peer_addr: *found_addr,
+	                    peer_id: recv_peer_id.clone(),
+	                };
+	                drop(map);  // libère le lock avant le send
+	                let _ = recv_socket.send_msg(&msg, *src_addr).await;
+	                println!("->({})", msg);                
+	                println!("{}", msg);
+	            } else {
+	                eprintln!("Peer {} not found", recv_peer_id);
+	            }
+	        }
+	    }
+    });
+
+    // Boucle d'envoi
+    let send_socket = Arc::clone(&socket);
+	tokio::spawn(async move {
+	    let mut reader = BufReader::new(stdin());
+	    let mut line = String::new();
+	    loop {
+	        // Affichage du prompt (bloquant mais sans conséquence pour un CLI)
+	        print!("> ");
+	        std::io::stdout().flush().unwrap();
+
+	        line.clear();
+	        match reader.read_line(&mut line).await {
+	            Ok(0) => break, // EOF (Ctrl+D)
+	            Ok(_) => {
+	                let msg_text = line.trim();
+	                if msg_text == "/q" {
+	                    break;
+	                }
+	                if msg_text.is_empty() {
+	                    continue;
+	                }
+	                let msg = Message::Classic {
+	                    src_addr: public_addr,
+	                    src_id: peer_id.clone(),
+	                    dst_addr: "0.0.0.0:0".parse().unwrap(),
+	                    dst_id: "all".to_string(),
+	                    time: now_secs(),
+	                    txt: msg_text.to_string(),
+	                };
+	                if let Err(e) = send_socket.send_msg(&msg, relay_addr).await {
+	                    eprintln!("Erreur d’envoi : {}", e);
+	                } else {
+	                    println!("->({})", msg);
+	                }
+	            }
+	            Err(e) => {
+	                eprintln!("Erreur de lecture : {}", e);
+	                break;
+	            }
+	        }
+	    }
+	});
 }
 
-pub async fn user_only(socket: UdpSocket, public_addr: SocketAddr, peer_id: String) {
+pub async fn user_only(_socket: UdpSocket, _public_addr: SocketAddr, _peer_id: String) {
         
 }
