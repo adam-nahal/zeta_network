@@ -36,55 +36,72 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 		
 		match &msg {
             // Un relai se déclare : on l'ajoute/met à jour dans la map
-            Message::BeNewRelay { src_addr, src_id, time, .. } => {
+            Message::BeNewRelay { header } => {
                 relays_list.lock().await
-                    .entry(*src_addr)
-                    .and_modify(|(_, t)| *t = *time)
-                    .or_insert((src_id.clone(), *time));
+                    .entry(header.src_addr)
+                    .and_modify(|(_, t)| *t = header.time)
+                    .or_insert((header.src_id.clone(), header.time));
 
                 // On accuse réception
-                let ack = Message::Ack {
-                    src_addr: public_addr,
-                    src_id: peer_id.clone(),
-                    time: now_secs(),
+                let msg = Message::Ack {
+                	header: MessageHeader {
+	                    src_addr: public_addr,
+	                    src_id: peer_id.clone(),
+	                    dst_addr: header.src_addr,
+	                    dst_id: header.src_id.clone(),
+	                    time: now_secs(),                		
+                	}
                 };
-                let _ = socket.send_msg(&ack, sender_addr).await;
-                println!("->{}", ack);
+                let _ = socket.send_msg(&msg, sender_addr).await;
+                println!("->{}", msg);
             }
 
             // Un peer cherche un relai : on lui en renvoie un
-            Message::NeedRelay { src_addr, src_id, .. } => {
+            Message::NeedRelay { header } => {
                 let relays = relays_list.lock().await;
                 let chosen_relay = relays
 			        .iter()
-			        .find(|(addr, _)| *addr != src_addr);
+			        .find(|(addr, _)| **addr != header.src_addr);
                 if let Some((relay_addr, (relay_id, _))) = chosen_relay {
                     let msg = Message::PeerInfo {
+                    	header: MessageHeader {
+	                        src_addr: public_addr,
+	                        src_id: "hubRelay".to_string(),
+	                        dst_addr: header.src_addr,
+	                        dst_id: header.src_id.clone(),
+	                    	time: now_secs(),
+	                    },
                         peer_addr: *relay_addr,
                         peer_id: relay_id.to_string(),
                     };
-                    let _ = socket.send_msg(&msg, *src_addr).await;
+                    let _ = socket.send_msg(&msg, header.src_addr).await;
                     println!("->{}", msg);
 
                     // Avertissons le relais concerné
                     let msg = Message::RelayHasNewClient {
-                        src_addr: public_addr,
-                        src_id: "hubRelay".to_string(),
-                        peer_addr: *src_addr,
-                        peer_id: src_id.clone(),
-                    	time: now_secs(),
+                    	header: MessageHeader {
+	                        src_addr: public_addr,
+	                        src_id: "hubRelay".to_string(),
+	                        dst_addr: *relay_addr,
+	                        dst_id: relay_id.clone(),
+	                    	time: now_secs(),
+                    	},
+                        peer_addr: header.src_addr,
+                        peer_id: header.src_id.clone(),
                     };
                     let _ = socket.send_msg(&msg, *relay_addr).await;
                     println!("->{}", msg);
                 } else {
                     let msg = Message::NoRelayAvailable {
-                        src_addr: public_addr,
-                        src_id: "hubRelay".to_string(),
-                        dst_addr: *src_addr,
-                        dst_id: src_id.clone(),
-                    	time: now_secs(),
+                    	header: MessageHeader {
+	                        src_addr: public_addr,
+	                        src_id: "hubRelay".to_string(),
+	                        dst_addr: header.src_addr,
+	                        dst_id: header.src_id.clone(),
+	                    	time: now_secs(),
+                    	},
                     };
-                    let _ = socket.send_msg(&msg, *src_addr).await;
+                    let _ = socket.send_msg(&msg, header.src_addr).await;
                     println!("->{}", msg);
                 }
             }

@@ -62,9 +62,13 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
     // S'enregistre auprès du hubrelay en tant que relay
     println!("Asking the hub relay to be a relay...");
     let msg = Message::BeNewRelay {
-        src_addr: public_addr,
-        src_id: peer_id.clone(),
-        time: now_secs(),
+    	header: MessageHeader {
+	        src_addr: public_addr,
+	        src_id: peer_id.clone(),
+	        dst_addr: hub_relay_addr,
+	        dst_id: "hubrelay".to_string(),
+	        time: now_secs(),
+	    }
     };
     let _ = socket.send_msg(&msg, hub_relay_addr).await;  
     println!("->({})", msg);
@@ -89,45 +93,47 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 
 	        // Ajout des nouveaux noeuds ou mise à jour de la dernière connection
 	        let connected_peers_clone = Arc::clone(&recv_peers_list);
-	        if let Message::Register { src_id, time, .. } = &msg {
+	        if let Message::Register { header } = &msg {
 	            connected_peers_clone.lock().await
 	                .entry(sender_addr)  // La clé existe-t-elle déjà ?
-	                .and_modify(|(_, t)| *t = *time)
-	                .or_insert((src_id.clone(), *time));
+	                .and_modify(|(_, t)| *t = header.time)
+	                .or_insert((header.src_id.clone(), header.time));
 	        }
 
 	        // Relaie le message si c'est un message à relayer
-	        if let Message::Classic { dst_addr, .. } = &msg {
-	            if public_addr != *dst_addr {
+	        if let Message::Classic { header, .. } = &msg {
+	            if public_addr != header.dst_addr {
 	                relay_message(&connected_peers_clone, sender_addr, msg.clone(), &recv_socket).await;
 	            }
 	        }
 
 	        // Fait le pont entre deux noeuds
-	        if let Message::Connect { dst_addr, dst_id, .. } = &msg {
+	        if let Message::Connect { header } = &msg {
 	            let map = connected_peers_clone.lock().await;  // lock d'abord
-	            if map.contains_key(dst_addr) {
+	            if map.contains_key(&header.dst_addr) {
 	                drop(map);  // libère le lock avant le send
-	                let _ = recv_socket.send_msg(&msg, *dst_addr).await;
+	                let _ = recv_socket.send_msg(&msg, header.dst_addr).await;
 	                println!("->({})", msg);
-	                println!("Sent to {}: '{}'", dst_addr, msg);
+	                println!("Sent to {}: '{}'", header.dst_addr, msg);
 	            } else {
-	                eprintln!("Peer {} ({}) is unknown", dst_addr, dst_id);
+	                eprintln!("Peer {} ({}) is unknown", header.dst_addr, header.dst_id);
 	            }
 	        }
 
 	        // Ce relais a un nouveau client qui veut se connecter -> hole punching
-	        if let Message::RelayHasNewClient { peer_addr, peer_id: client_id, time, .. } = &msg {           
+	        if let Message::RelayHasNewClient { header, peer_addr, peer_id: client_id } = &msg {           
 	            connected_peers_clone.lock().await
 	                .entry(sender_addr)  // La clé existe-t-elle déjà ?
-	                .and_modify(|(_, t)| *t = *time)
-	                .or_insert((recv_peer_id.clone(), *time));
+	                .and_modify(|(_, t)| *t = header.time)
+	                .or_insert((recv_peer_id.clone(), header.time));
 	            let msg = Message::PunchTheHole {
-	                src_addr: public_addr,
-	                src_id: recv_peer_id.clone(),
-	                dst_addr: *peer_addr,
-	                dst_id: client_id.to_string(),
-	                time: now_secs(),
+	            	header: MessageHeader {
+		                src_addr: public_addr,
+		                src_id: recv_peer_id.clone(),
+		                dst_addr: *peer_addr,
+		                dst_id: client_id.to_string(),
+		                time: now_secs(),
+	            	}
 	            };
 	            let _ = recv_socket.send_msg(&msg, *peer_addr).await;
 	            println!("->({})", msg);
@@ -135,15 +141,22 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	        }
 
 	        // Répond aux demandes d'informations
-	        if let Message::AskForAddr { src_addr, peer_id, .. } = &msg {
+	        if let Message::AskForAddr { header, peer_id } = &msg {
 	            let map = connected_peers_clone.lock().await;  // lock d'abord
 	            if let Some((found_addr, _)) = map.iter().find(|(_, (id, _))| *id == *peer_id) {
 	                let msg = Message::PeerInfo {
+	                	header: MessageHeader {
+			                src_addr: public_addr,
+			                src_id: recv_peer_id.clone(),
+			                dst_addr: header.src_addr,
+			                dst_id: header.src_id.clone(),
+			                time: now_secs(),
+	                	},
 	                    peer_addr: *found_addr,
-	                    peer_id: recv_peer_id.clone(),
+	                    peer_id: peer_id.clone(),
 	                };
 	                drop(map);  // libère le lock avant le send
-	                let _ = recv_socket.send_msg(&msg, *src_addr).await;
+	                let _ = recv_socket.send_msg(&msg, header.src_addr).await;
 	                println!("->({})", msg);                
 	                println!("{}", msg);
 	            } else {
@@ -175,11 +188,13 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	                    continue;
 	                }
 	                let msg = Message::Classic {
-	                    src_addr: public_addr,
-	                    src_id: peer_id.clone(),
-	                    dst_addr: "0.0.0.0:0".parse().unwrap(),
-	                    dst_id: "all".to_string(),
-	                    time: now_secs(),
+	                	header: MessageHeader {
+		                    src_addr: public_addr,
+		                    src_id: peer_id.clone(),
+		                    dst_addr: "0.0.0.0:0".parse().unwrap(),
+		                    dst_id: "all".to_string(),
+		                    time: now_secs(),
+	                	},
 	                    txt: msg_text.to_string(),
 	                };
 	                if let Err(e) = send_socket.send_msg(&msg, relay_addr).await {

@@ -15,7 +15,6 @@ pub const MAX_PACKET_SIZE: usize = 4096;
 
 #[derive(Debug, Parser, Clone)]
 pub struct Opts {
-    // Si ce noeud est celui qui initie la connection, celui qui la recoit, voir le relai
     #[arg(long, value_enum)]
     pub mode: Mode,
 
@@ -32,83 +31,63 @@ pub enum Mode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {
     Register {  // Client → Relay : "Je m'enregistre, voici mon adresse et mon id"
-        src_addr: SocketAddr,
-        src_id: String,
-        dst_addr: SocketAddr,
-        dst_id: String,
-        time: u64,
+    	header: MessageHeader,
     },
 
     Connect {  // Dial → Relay : "Mets-moi en contact avec ce peer_id"
-        src_addr: SocketAddr,
-        src_id: String,
-        dst_addr: SocketAddr,   // l'id du Listen recherché
-        dst_id: String,
-        time: u64,
+    	header: MessageHeader,
     },
 
     AskForAddr {  // Relay → Client : "Voici l'adresse+id du peer que tu cherches"
-        src_addr: SocketAddr,
-        src_id: String,
+    	header: MessageHeader,
         peer_id: String,
-        time: u64,
     },
 
     PeerInfo {  // Relay → Client : "Voici l'adresse+id du peer que tu cherches"
+    	header: MessageHeader,
         peer_addr: SocketAddr,
         peer_id: String,
     },
 
     Classic {  // Peer → Peer : message direct (hole punching, hello, etc.)
-        src_addr: SocketAddr,
-        src_id: String,
-        dst_addr: SocketAddr,
-        dst_id: String,
+    	header: MessageHeader,
         txt: String,
-        time: u64,
     },
 
     BeNewRelay {  // new Relay → Serveur stockant les adresses des relais : "Je me déclare relay"
-        src_addr: SocketAddr,
-        src_id: String,
-        time: u64,
+    	header: MessageHeader,
     },
 
     NeedRelay {
-        src_addr: SocketAddr,
-        src_id: String,
-        time: u64,
+		header: MessageHeader,
     },
 
     RelayHasNewClient {
-        src_addr: SocketAddr,
-        src_id: String,
+    	header: MessageHeader,
         peer_addr: SocketAddr,
         peer_id: String,
-        time: u64,
     },
 
     NoRelayAvailable {
-        src_addr: SocketAddr,
-        src_id: String,
-        dst_addr: SocketAddr,
-        dst_id: String,
-        time: u64,
+    	header: MessageHeader,
     },
 
     PunchTheHole {
-        src_addr: SocketAddr,
-        src_id: String,
-        dst_addr: SocketAddr,
-        dst_id: String,
-        time: u64,
+    	header: MessageHeader,
     },
 
     Ack {
-        src_addr: SocketAddr,
-        src_id: String,
-        time: u64,
+    	header: MessageHeader,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MessageHeader {
+    pub src_addr: SocketAddr,
+    pub src_id: String,
+    pub dst_addr: SocketAddr,
+    pub dst_id: String,
+    pub time: u64,
 }
 
 #[async_trait::async_trait]
@@ -127,40 +106,52 @@ impl UdpSocketExt for UdpSocket {
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Message::Register { src_addr, src_id, dst_addr, dst_id, time } => {
-                write!(f, "[Register] {} ({}) → {} ({}) ({})", src_addr, src_id, dst_addr, dst_id, fmt_time(*time))
+            Message::Register { header } => {
+                write!(f, "[Register] [{}]", *header)
             }
-            Message::Connect { src_addr, src_id, dst_id, dst_addr, time } => {
-                write!(f, "[Connect] {} ({}) → {} ({}) ({})", src_addr, src_id, dst_addr, dst_id, fmt_time(*time))
+            Message::Connect { header } => {
+                write!(f, "[Connect] [{}]", *header)
             }
-            Message::AskForAddr { src_addr, src_id, peer_id, time } => {
-                write!(f, "[AskForAddr] {} ({}) asks for {}'s addr ({})", *src_addr, src_id, peer_id, fmt_time(*time))
+            Message::AskForAddr { header, peer_id } => {
+                write!(f, "[AskForAddr] [{}] He asks for {}'s addr", header, peer_id)
             }
-            Message::PeerInfo { peer_addr, peer_id } => {
-                write!(f, "[PeerInfo] {} ({})", peer_addr, peer_id)
+            Message::PeerInfo { header, peer_addr, peer_id } => {
+                write!(f, "[PeerInfo] [{}] {} ({})", header, peer_addr, peer_id)
             }
-            Message::Classic { src_addr, src_id, dst_addr, dst_id, txt, time } => {
-                write!(f, "[{} ({}) → {} ({})] \"{}\" ({})", src_addr, src_id, dst_addr, dst_id, txt, fmt_time(*time))
+            Message::Classic { header, txt } => {
+                write!(f, "[Classic] [{}] \"{}\"", header, txt)
             }
-            Message::BeNewRelay { src_addr, src_id, time } => {
-                write!(f, "[BeNewRelay] {} ({}) ({})", src_addr, src_id, fmt_time(*time))
+            Message::BeNewRelay { header } => {
+                write!(f, "[BeNewRelay] [{}]", header)
             }
-            Message::NeedRelay { src_addr, src_id, time } => {
-                write!(f, "[NeedRelay] {} ({}) ({})", src_addr, src_id, fmt_time(*time))
+            Message::NeedRelay { header } => {
+                write!(f, "[NeedRelay] [{}]", header)
             }
-            Message::Ack { src_addr, src_id, time } => {
-                write!(f, "[Ack] {} ({}) ({})", src_addr, src_id, fmt_time(*time))
+            Message::Ack { header } => {
+                write!(f, "[Ack] [{}]", header)
             }
-            Message::RelayHasNewClient { peer_addr, peer_id, time, .. } => {
-                write!(f, "[RelayHasNewClient] {} ({}) wants to connect to you, relay ({})", peer_addr, peer_id, fmt_time(*time))
+            Message::RelayHasNewClient { header, peer_addr, peer_id } => {
+                write!(f, "[RelayHasNewClient] [{}] {} ({}) wants to connect to you as relay", header, peer_addr, peer_id)
             }
-            Message::NoRelayAvailable { src_addr, src_id, dst_addr, dst_id, time } => {
-                write!(f, "[NoRelayAvailable] [{} ({}) → {} ({})] ({})", src_addr, src_id, dst_addr, dst_id, fmt_time(*time))
+            Message::NoRelayAvailable { header } => {
+                write!(f, "[NoRelayAvailable] [{}]", header)
             }
-            Message::PunchTheHole { src_addr, src_id, dst_addr, dst_id, time } => {
-                write!(f, "[PunchTheHole] [{} ({}) → {} ({})] ({})", src_addr, src_id, dst_addr, dst_id, fmt_time(*time))
+            Message::PunchTheHole { header } => {
+                write!(f, "[PunchTheHole] [{}]", header)
             }
         }
+    }
+}
+
+impl fmt::Display for MessageHeader {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} ({}) -> {} ({}) ({})",
+            self.src_addr, self.src_id,
+            self.dst_addr, self.dst_id,
+            fmt_time(self.time)
+        )
     }
 }
 
@@ -225,8 +216,8 @@ pub async fn wait_for_ack(socket: &UdpSocket) -> bool {
     loop {
         let Some((msg, _)) = recv_msg(socket).await else { return false };
         match &msg {
-            Message::Ack { src_addr, src_id, .. } => {
-                println!("Ack from {} ({})", src_addr, src_id);
+            Message::Ack { header } => {
+                println!("Ack from {} ({})", header.src_addr, header.src_id);
                 return true;
             }
             _ => println!("Unexpected message: '{}'", msg),
@@ -239,9 +230,13 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
     let (relay_addr, relay_id) = loop {
         println!("Asking the hub relay an available relay...");
         let msg = Message::NeedRelay {
-            src_addr: public_addr,
-            src_id: peer_id.to_string(),
-            time: now_secs(),
+        	header: MessageHeader {
+	            src_addr: public_addr,
+	            src_id: peer_id.to_string(),
+	            dst_addr: hub_relay_addr,
+	            dst_id: "hubrelay".to_string(),
+	            time: now_secs(),        		
+        	}
         };
         let _ = socket.send_msg(&msg, hub_relay_addr).await;
         println!("->({})", msg);
@@ -263,11 +258,13 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
 
     // Enregistrement auprès du relais
     let msg = Message::Register {
-        src_addr: public_addr,
-        src_id: peer_id.to_string(),
-        dst_addr: relay_addr,
-        dst_id: relay_id.clone(),
-        time: now_secs(),
+    	header: MessageHeader {
+	        src_addr: public_addr,
+	        src_id: peer_id.to_string(),
+	        dst_addr: relay_addr,
+	        dst_id: relay_id.clone(),
+	        time: now_secs(),
+    	}
     };
     let _ = socket.send_msg(&msg, relay_addr).await;
     println!("->({})", msg);
