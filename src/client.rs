@@ -66,7 +66,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	        src_addr: public_addr,
 	        src_id: peer_id.clone(),
 	        dst_addr: hub_relay_addr,
-	        dst_id: "hubrelay".to_string(),
+	        dst_id: "hub".to_string(),
 	        time: now_secs(),
 	    }
     };

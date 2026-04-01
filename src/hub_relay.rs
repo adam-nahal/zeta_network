@@ -66,7 +66,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
                     let msg = Message::PeerInfo {
                     	header: MessageHeader {
 	                        src_addr: public_addr,
-	                        src_id: "hubRelay".to_string(),
+	                        src_id: "hub".to_string(),
 	                        dst_addr: header.src_addr,
 	                        dst_id: header.src_id.clone(),
 	                    	time: now_secs(),
@@ -81,7 +81,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
                     let msg = Message::RelayHasNewClient {
                     	header: MessageHeader {
 	                        src_addr: public_addr,
-	                        src_id: "hubRelay".to_string(),
+	                        src_id: "hub".to_string(),
 	                        dst_addr: *relay_addr,
 	                        dst_id: relay_id.clone(),
 	                    	time: now_secs(),
@@ -95,7 +95,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
                     let msg = Message::NoRelayAvailable {
                     	header: MessageHeader {
 	                        src_addr: public_addr,
-	                        src_id: "hubRelay".to_string(),
+	                        src_id: "hub".to_string(),
 	                        dst_addr: header.src_addr,
 	                        dst_id: header.src_id.clone(),
 	                    	time: now_secs(),
