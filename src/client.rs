@@ -112,11 +112,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	        }
 
 	        // Ce relais a un nouveau client qui veut se connecter -> hole punching
-	        if let Message::RelayHasNewClient { header, peer_addr, peer_id: client_id } = &msg {           
-	            connected_peers_clone.lock().await
-	                .entry(sender_addr)  // La clé existe-t-elle déjà ?
-	                .and_modify(|(_, t)| *t = header.time)
-	                .or_insert((recv_peer_id.clone(), header.time));
+	        if let Message::RelayHasNewClient { peer_addr, peer_id: client_id, .. } = &msg {
 	            let msg = Message::PunchTheHole {
 	            	header: MessageHeader {
             			msg_id: new_msg_id(),
