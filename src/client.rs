@@ -88,7 +88,6 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		            },
 		            reply_to: header.msg_id,
 		        };
-	            sleep(Duration::from_secs(2)).await;  // Le temps que le relay fasse hole punching
 		        let _ = recv_socket.send_msg(&msg, sender_addr).await;
 	        }
 

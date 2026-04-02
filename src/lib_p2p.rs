@@ -250,6 +250,7 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
         match hub_rx.recv().await {
             Some((Message::PeerInfo { peer_addr, peer_id: rid, .. }, _)) => {
                 println!("Received relay address {} ({})", peer_addr, rid);
+        		tokio::time::sleep(Duration::from_millis(500)).await;  // Attendre le hole punching chez le relais
                 break (peer_addr, rid);
             }
             Some((Message::NoRelayAvailable { .. }, _)) => {
