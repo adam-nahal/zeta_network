@@ -67,7 +67,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	let msg_id = new_msg_id();
     let msg = Message::BeNewRelay {
     	header: MessageHeader {
-            msg_id: new_msg_id(),
+            msg_id: msg_id,
 	        src_addr: public_addr,
 	        src_id: peer_id.clone(),
 	        dst_addr: hub_relay_addr,
