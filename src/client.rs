@@ -80,7 +80,6 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	}
 
 	// Demande au hub relais l'adresse d'un relais
-    println!("\nAsking the hub relay the address of a relay...");
 	let Some((relay_addr, _relay_id)) = connect_to_a_relay(
 		&socket, public_addr, &peer_id, hub_relay_addr, 
 		&mut hub_rx, &ack_waiter

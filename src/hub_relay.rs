@@ -54,7 +54,6 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
                 	reply_to: header.msg_id
                 };
                 let _ = socket.send_msg(&msg, sender_addr).await;
-                println!("->{}", msg);
             }
 
             // Un peer cherche un relai : on lui en renvoie un
@@ -77,7 +76,6 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
                         peer_id: relay_id.to_string(),
                     };
                     let _ = socket.send_msg(&msg, header.src_addr).await;
-                    println!("->{}", msg);
 
                     // Avertissons le relais concerné
                     let msg = Message::RelayHasNewClient {
@@ -93,7 +91,6 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
                         peer_id: header.src_id.clone(),
                     };
                     let _ = socket.send_msg(&msg, *relay_addr).await;
-                    println!("->{}", msg);
                 } else {
                     let msg = Message::NoRelayAvailable {
                     	header: MessageHeader {
@@ -106,7 +103,6 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
                     	},
                     };
                     let _ = socket.send_msg(&msg, header.src_addr).await;
-                    println!("->{}", msg);
                 }
             }
             _ => println!("Unexpected message: '{}'", msg)
