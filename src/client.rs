@@ -50,6 +50,11 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
     // Crée la liste de tous les clients qui ont contacté ce relai
     let peers_list: PeersMap = Arc::new(Mutex::new(HashMap::new()));
 
+	// Crée le dispatcher
+	let (dispatcher, inbox) = create_node_channels();
+	let NodeInbox { ack_waiter, mut hub_rx, mut general_rx } = inbox;
+	tokio::spawn(dispatcher.run(Arc::clone(&socket)));
+
     // Suppression automatique des noeuds inactifs
     let peers_cleanup = Arc::clone(&peers_list);
     tokio::spawn(async move {
@@ -61,8 +66,10 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 
     // S'enregistre auprès du hubrelay en tant que relay
     println!("Asking the hub relay to be a relay...");
+	let msg_id = new_msg_id();
     let msg = Message::BeNewRelay {
     	header: MessageHeader {
+            msg_id: new_msg_id(),
 	        src_addr: public_addr,
 	        src_id: peer_id.clone(),
 	        dst_addr: hub_relay_addr,
@@ -70,24 +77,22 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	        time: now_secs(),
 	    }
     };
-    let _ = socket.send_msg(&msg, hub_relay_addr).await;
-
-    if !wait_for_ack(&socket).await {
-	    println!("[ERROR] No ack from relay, aborting");
+    if !send_and_wait_ack(&socket, &msg, hub_relay_addr, &ack_waiter, msg_id).await {
 	    return;
 	}
 
 	// Demande au hub relais l'adresse d'un relais
-	let Some((relay_addr, _relay_id)) = connect_to_a_relay(&socket, public_addr, &peer_id, hub_relay_addr)
-		.await else {return};
+	let Some((relay_addr, _relay_id)) = connect_to_a_relay(
+		&socket, public_addr, &peer_id, hub_relay_addr, 
+		&mut hub_rx, &ack_waiter
+		).await else {return};
 
 	// Boucle de réception
     let recv_socket = Arc::clone(&socket);
     let recv_peers_list = Arc::clone(&peers_list);
     let recv_peer_id = peer_id.clone();
     tokio::spawn(async move {
-    	loop {
-	    	let Some((msg, sender_addr)) = recv_msg(&recv_socket).await else {continue};
+    	while let Some((msg, sender_addr)) = general_rx.recv().await {
 
 	        // Ajout des nouveaux noeuds ou mise à jour de la dernière connection
 	        let connected_peers_clone = Arc::clone(&recv_peers_list);
@@ -96,6 +101,19 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	                .entry(sender_addr)  // La clé existe-t-elle déjà ?
 	                .and_modify(|(_, t)| *t = header.time)
 	                .or_insert((header.src_id.clone(), header.time));
+
+	            let ack = Message::Ack {
+		            header: MessageHeader {
+		                msg_id:   new_msg_id(),
+		                src_addr: public_addr,
+		                src_id:   recv_peer_id.clone(),
+		                dst_addr: header.src_addr,
+		                dst_id:   header.src_id.clone(),
+		                time:     now_secs(),
+		            },
+		            reply_to: header.msg_id,
+		        };
+		        let _ = recv_socket.send_msg(&ack, sender_addr).await;
 	        }
 
 	        // Relaie le message si c'est un message à relayer
@@ -125,6 +143,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	                .or_insert((recv_peer_id.clone(), header.time));
 	            let msg = Message::PunchTheHole {
 	            	header: MessageHeader {
+            			msg_id: new_msg_id(),
 		                src_addr: public_addr,
 		                src_id: recv_peer_id.clone(),
 		                dst_addr: *peer_addr,
@@ -142,6 +161,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	            if let Some((found_addr, _)) = map.iter().find(|(_, (id, _))| *id == *peer_id) {
 	                let msg = Message::PeerInfo {
 	                	header: MessageHeader {
+            				msg_id: new_msg_id(),
 			                src_addr: public_addr,
 			                src_id: recv_peer_id.clone(),
 			                dst_addr: header.src_addr,
@@ -184,6 +204,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	                }
 	                let msg = Message::Classic {
 	                	header: MessageHeader {
+            				msg_id: new_msg_id(),
 		                    src_addr: public_addr,
 		                    src_id: peer_id.clone(),
 		                    dst_addr: "0.0.0.0:0".parse().unwrap(),

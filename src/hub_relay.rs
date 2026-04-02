@@ -44,12 +44,14 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
                 // On accuse réception
                 let msg = Message::Ack {
                 	header: MessageHeader {
+                    	msg_id: new_msg_id(),
 	                    src_addr: public_addr,
 	                    src_id: peer_id.clone(),
 	                    dst_addr: header.src_addr,
 	                    dst_id: header.src_id.clone(),
 	                    time: now_secs(),                		
-                	}
+                	},
+                	reply_to: header.msg_id
                 };
                 let _ = socket.send_msg(&msg, sender_addr).await;
                 println!("->{}", msg);
@@ -64,6 +66,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
                 if let Some((relay_addr, (relay_id, _))) = chosen_relay {
                     let msg = Message::PeerInfo {
                     	header: MessageHeader {
+                    		msg_id: new_msg_id(),
 	                        src_addr: public_addr,
 	                        src_id: "hub".to_string(),
 	                        dst_addr: header.src_addr,
@@ -79,6 +82,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
                     // Avertissons le relais concerné
                     let msg = Message::RelayHasNewClient {
                     	header: MessageHeader {
+                    		msg_id: new_msg_id(),
 	                        src_addr: public_addr,
 	                        src_id: "hub".to_string(),
 	                        dst_addr: *relay_addr,
@@ -93,6 +97,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
                 } else {
                     let msg = Message::NoRelayAvailable {
                     	header: MessageHeader {
+                    		msg_id: new_msg_id(),
 	                        src_addr: public_addr,
 	                        src_id: "hub".to_string(),
 	                        dst_addr: header.src_addr,

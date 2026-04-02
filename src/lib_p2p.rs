@@ -5,10 +5,11 @@ use clap::{Parser, Subcommand};
 use serde::{Serialize, Deserialize};
 use chrono::{DateTime, Utc};
 use anyhow::Result;
-use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration};
+use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::time::{sleep, timeout, Duration};
 use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 
 pub type PeersMap = Arc<Mutex<HashMap<SocketAddr, (String, u64)>>>; // un noeud = [Addr, (pseudo, derniere connection en secs)]
@@ -79,11 +80,13 @@ pub enum Message {
 
     Ack {
     	header: MessageHeader,
+    	reply_to: u64,
     },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageHeader {
+	pub msg_id: u64,
     pub src_addr: SocketAddr,
     pub src_id: String,
     pub dst_addr: SocketAddr,
@@ -130,8 +133,8 @@ impl fmt::Display for Message {
             Message::NeedRelay { header } => {
                 write!(f, "[NeedRelay] [{}]", header)
             }
-            Message::Ack { header } => {
-                write!(f, "[Ack] [{}]", header)
+            Message::Ack { header, reply_to } => {
+                write!(f, "[Ack] [{}] reply_to=#{}", header, reply_to)
             }
             Message::RelayHasNewClient { header, peer_addr, peer_id } => {
                 write!(f, "[RelayHasNewClient] [{}] {} ({}) wants to connect to you as relay", header, peer_addr, peer_id)
@@ -150,9 +153,10 @@ impl fmt::Display for MessageHeader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{} ({}) -> {} ({}) ({})",
+            "{} ({}) -> {} ({}) (#{} - {})",
             self.src_addr, self.src_id,
             self.dst_addr, self.dst_id,
+            self.msg_id,
             fmt_time(self.time)
         )
     }
@@ -218,61 +222,56 @@ pub async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, msg: Messa
     }
 }
 
-pub async fn wait_for_ack(socket: &UdpSocket) -> bool {
-    loop {
-        let Some((msg, _)) = recv_msg(socket).await else { return false };
-        match &msg {
-            Message::Ack { header } => {
-                println!("Ack from {} ({})", header.src_addr, header.src_id);
-                return true;
-            }
-            _ => println!("Unexpected message: '{}'", msg),
-        }
+// Enregistre l'attente, envoie le message, attend le signal
+pub async fn send_and_wait_ack(socket: &UdpSocket, msg: &Message, dest: SocketAddr, ack_waiter: &AckWaiter, msg_id: u64) -> bool {
+    let rx = ack_waiter.register(msg_id).await;   // register AVANT send
+    let _ = socket.send_msg(msg, dest).await;
+    match timeout(Duration::from_secs(10), rx).await {
+        Ok(Ok(())) => true,
+        _ => { eprintln!("[ERROR] Timeout waiting for ack"); false }
     }
 }
 
-pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, peer_id: &str, hub_relay_addr: SocketAddr) -> Option<(SocketAddr, String)> {
-    // Demande un hubrelay jusqu'à en obtenir un
+pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, peer_id: &str, hub_relay_addr: SocketAddr, hub_rx: &mut MsgReceiver, ack_waiter: &AckWaiter) -> Option<(SocketAddr, String)> {
     let (relay_addr, relay_id) = loop {
         println!("Asking the hub relay an available relay...");
         let msg = Message::NeedRelay {
-        	header: MessageHeader {
-	            src_addr: public_addr,
-	            src_id: peer_id.to_string(),
-	            dst_addr: hub_relay_addr,
-	            dst_id: "hubrelay".to_string(),
-	            time: now_secs(),        		
-        	}
+            header: MessageHeader {
+                msg_id:   new_msg_id(),
+                src_addr: public_addr,
+                src_id:   peer_id.to_string(),
+                dst_addr: hub_relay_addr,
+                dst_id:   "hubrelay".to_string(),
+                time:     now_secs(),
+            }
         };
         let _ = socket.send_msg(&msg, hub_relay_addr).await;
 
-        let Some((msg, _)) = recv_msg(socket).await else { continue };
-        match &msg {
-            Message::PeerInfo { peer_addr, peer_id, .. } => {
-                println!("Received relay address {} ({})", peer_addr, peer_id);
-                break (*peer_addr, peer_id.clone());
+        match hub_rx.recv().await {
+            Some((Message::PeerInfo { peer_addr, peer_id: rid, .. }, _)) => {
+                println!("Received relay address {} ({})", peer_addr, rid);
+                break (peer_addr, rid);
             }
-            Message::NoRelayAvailable { .. } => {
-                println!("[WARN] No relays available, retrying soon...");
+            Some((Message::NoRelayAvailable { .. }, _)) => {
+                println!("[WARN] No relays available, retrying in 10s...");
                 sleep(Duration::from_secs(10)).await;
             }
-            _ => println!("Unexpected message: '{}'", msg),
+            _ => { eprintln!("[ERROR] hub channel closed"); return None; }
         }
     };
 
-    // Enregistrement auprès du relais
+    let msg_id = new_msg_id();
     let msg = Message::Register {
-    	header: MessageHeader {
-	        src_addr: public_addr,
-	        src_id: peer_id.to_string(),
-	        dst_addr: relay_addr,
-	        dst_id: relay_id.clone(),
-	        time: now_secs(),
-    	}
+        header: MessageHeader {
+            msg_id,
+            src_addr: public_addr,
+            src_id:   peer_id.to_string(),
+            dst_addr: relay_addr,
+            dst_id:   relay_id.clone(),
+            time:     now_secs(),
+        }
     };
-    let _ = socket.send_msg(&msg, relay_addr).await;
-
-    if !wait_for_ack(socket).await {
+    if !send_and_wait_ack(&socket, &msg, relay_addr, ack_waiter, msg_id).await {
         println!("[ERROR] No ack from relay, aborting");
         return None;
     }
@@ -285,4 +284,81 @@ fn fmt_time(time: u64) -> String {
     DateTime::<Utc>::from_timestamp(time as i64, 0)
         .map(|dt| dt.format("%H:%M:%S").to_string())
         .unwrap_or_else(|| format!("t={}", time))
+}
+
+static MSG_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+pub fn new_msg_id() -> u64 {
+    MSG_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+#[derive(Clone)]
+pub struct AckWaiter {
+    pending: Arc<Mutex<HashMap<u64, oneshot::Sender<()>>>>,
+}
+
+impl AckWaiter {
+    pub fn new() -> Self {
+        Self { pending: Arc::new(Mutex::new(HashMap::new())) }
+    }
+
+    // Appeler AVANT send_msg
+    pub async fn register(&self, msg_id: u64) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+        self.pending.lock().await.insert(msg_id, tx);
+        rx
+    }
+
+    // Appelé par le dispatcher
+    pub async fn resolve(&self, reply_to: u64) {
+        match self.pending.lock().await.remove(&reply_to) {
+            Some(tx) => { let _ = tx.send(()); }
+            None => eprintln!("[WARN] Ack inattendu pour msg_id={}", reply_to),
+        }
+    }
+}
+
+pub type MsgItem     = (Message, SocketAddr);
+pub type MsgSender   = mpsc::Sender<MsgItem>;
+pub type MsgReceiver = mpsc::Receiver<MsgItem>;
+
+pub struct NodeInbox {
+    pub ack_waiter: AckWaiter,
+    pub hub_rx:     MsgReceiver,
+    pub general_rx: MsgReceiver,
+}
+
+pub struct NodeDispatcher {
+    ack_waiter: AckWaiter,
+    hub_tx:     MsgSender,
+    general_tx: MsgSender,
+}
+
+pub fn create_node_channels() -> (NodeDispatcher, NodeInbox) {
+    let ack_waiter               = AckWaiter::new();
+    let (hub_tx,     hub_rx)     = mpsc::channel(32);
+    let (general_tx, general_rx) = mpsc::channel(256);
+    (
+        NodeDispatcher { ack_waiter: ack_waiter.clone(), hub_tx, general_tx },
+        NodeInbox      { ack_waiter,                     hub_rx, general_rx },
+    )
+}
+
+impl NodeDispatcher {
+    pub async fn run(self, socket: Arc<UdpSocket>) {
+        loop {
+            let Some((msg, addr)) = recv_msg(&socket).await else { continue };
+            match &msg {
+                Message::Ack { reply_to, .. } => {
+                    self.ack_waiter.resolve(*reply_to).await;
+                }
+                Message::PeerInfo { .. } | Message::NoRelayAvailable { .. } => {
+                    let _ = self.hub_tx.send((msg, addr)).await;
+                }
+                _ => {
+                    let _ = self.general_tx.send((msg, addr)).await;
+                }
+            }
+        }
+    }
 }
