@@ -88,6 +88,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		            },
 		            reply_to: header.msg_id,
 		        };
+	            sleep(Duration::from_secs(2)).await;  // Le temps que le relay fasse hole punching
 		        let _ = recv_socket.send_msg(&msg, sender_addr).await;
 	        }
 
@@ -103,7 +104,6 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	            let map = connected_peers_clone.lock().await;  // lock d'abord
 	            if map.contains_key(&header.dst_addr) {
 	                drop(map);  // libère le lock avant le send
-	                sleep(Duration::from_secs(5)).await;  // Le temps que le relay fasse hole punching
 	                let _ = recv_socket.send_msg(&msg, header.dst_addr).await;
 	                println!("Sent to {}: '{}'", header.dst_addr, msg);
 	            } else {
@@ -221,6 +221,9 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	        }
 	    }
 	});
+
+	// Pour éviter que le programme quit (tout est parallèle jusqu'ici...)
+	std::future::pending::<()>().await;
 }
 
 pub async fn user_only(_socket: UdpSocket, _public_addr: SocketAddr, _peer_id: String) {
