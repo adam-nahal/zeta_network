@@ -103,7 +103,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	            let map = connected_peers_clone.lock().await;  // lock d'abord
 	            if map.contains_key(&header.dst_addr) {
 	                drop(map);  // libère le lock avant le send
-	                sleep(Duration::from_secs(2)).await;  // Le temps que le relay fasse hole punching
+	                sleep(Duration::from_secs(5)).await;  // Le temps que le relay fasse hole punching
 	                let _ = recv_socket.send_msg(&msg, header.dst_addr).await;
 	                println!("Sent to {}: '{}'", header.dst_addr, msg);
 	            } else {
