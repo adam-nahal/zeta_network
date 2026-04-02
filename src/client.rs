@@ -35,11 +35,9 @@ pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {
     // Ajout de ce noeud au réseau Zeta Network
     match nat_type {
         OpenInternet | FullCone | RestrictedCone | PortRestrictedCone => {
-            println!("This node is become a relay ({:?})", nat_type);
             user_and_relay(socket, public_addr, peer_id, hub_relay_addr).await;
         }
         _ => {  // SymmetricUdpFirewall or Symmetric
-            println!("This node can't be a relay ({:?})", nat_type);
             user_only(socket, public_addr, peer_id).await;
         }
     }
@@ -65,7 +63,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
     });
 
     // S'enregistre auprès du hubrelay en tant que relay
-    println!("Asking the hub relay to be a relay...");
+    println!("\nAsking the hub relay to be a relay...");
 	let msg_id = new_msg_id();
     let msg = Message::BeNewRelay {
     	header: MessageHeader {
@@ -82,6 +80,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	}
 
 	// Demande au hub relais l'adresse d'un relais
+    println!("\nAsking the hub relay the address of a relay...");
 	let Some((relay_addr, _relay_id)) = connect_to_a_relay(
 		&socket, public_addr, &peer_id, hub_relay_addr, 
 		&mut hub_rx, &ack_waiter
