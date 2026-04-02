@@ -50,9 +50,6 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
     // Crée la liste de tous les clients qui ont contacté ce relai
     let peers_list: PeersMap = Arc::new(Mutex::new(HashMap::new()));
 
-    // Crée la liste de tous les messages reçus
-    let inbox: PeersMap = Arc::new(Mutex::new(HashMap::new()));
-
     // Suppression automatique des noeuds inactifs
     let peers_cleanup = Arc::clone(&peers_list);
     tokio::spawn(async move {
