@@ -104,7 +104,7 @@ impl UdpSocketExt for UdpSocket {
     async fn send_msg(&self, msg: &Message, next_hop: SocketAddr) -> Result<usize> {
         let encoded = bincode::serialize(&msg)?;
         let size = self.send_to(&encoded, next_hop).await?;
-		println!("->({})", msg);
+		println!("->{}", msg);
 		Ok(size)
     }
 }
