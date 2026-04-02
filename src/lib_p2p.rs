@@ -100,7 +100,9 @@ pub trait UdpSocketExt {
 impl UdpSocketExt for UdpSocket {
     async fn send_msg(&self, msg: &Message, next_hop: SocketAddr) -> Result<usize> {
         let encoded = bincode::serialize(&msg)?;
-        Ok(self.send_to(&encoded, next_hop).await?)
+        let size = self.send_to(&encoded, next_hop).await?;
+		println!("->({})", msg);
+		Ok(size)
     }
 }
 
@@ -175,7 +177,10 @@ pub async fn recv_msg(socket: &UdpSocket) -> Option<(Message, SocketAddr)> {
         return None;
     }    
     match bincode::deserialize(&buf[..size]) {
-        Ok(msg) => Some((msg, sender_addr)),
+        Ok(msg) => {
+	    	println!("<-{}", msg);
+	    	Some((msg, sender_addr))
+	    }
         Err(e) => {
             eprintln!("[WARN] Deserialization failed from {}: {}", sender_addr, e);
             None
@@ -227,7 +232,7 @@ pub async fn wait_for_ack(socket: &UdpSocket) -> bool {
 }
 
 pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, peer_id: &str, hub_relay_addr: SocketAddr) -> Option<(SocketAddr, String)> {
-    // Demande un relais jusqu'à en obtenir un
+    // Demande un hubrelay jusqu'à en obtenir un
     let (relay_addr, relay_id) = loop {
         println!("Asking the hub relay an available relay...");
         let msg = Message::NeedRelay {
@@ -240,18 +245,16 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
         	}
         };
         let _ = socket.send_msg(&msg, hub_relay_addr).await;
-        println!("->({})", msg);
 
         let Some((msg, _)) = recv_msg(socket).await else { continue };
-        println!("<-({})", msg);
         match &msg {
             Message::PeerInfo { peer_addr, peer_id, .. } => {
                 println!("Received relay address {} ({})", peer_addr, peer_id);
                 break (*peer_addr, peer_id.clone());
             }
             Message::NoRelayAvailable { .. } => {
-                println!("[WARN] No relays available, retrying in 5s...");
-                sleep(Duration::from_secs(15)).await;
+                println!("[WARN] No relays available, retrying soon...");
+                sleep(Duration::from_secs(10)).await;
             }
             _ => println!("Unexpected message: '{}'", msg),
         }
@@ -268,7 +271,6 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
     	}
     };
     let _ = socket.send_msg(&msg, relay_addr).await;
-    println!("->({})", msg);
 
     if !wait_for_ack(socket).await {
         println!("[ERROR] No ack from relay, aborting");

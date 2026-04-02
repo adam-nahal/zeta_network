@@ -32,7 +32,6 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 
     loop {
     	let Some((msg, sender_addr)) = recv_msg(&socket).await else {continue};
-    	println!("<-{}", msg);
 		
 		match &msg {
             // Un relai se déclare : on l'ajoute/met à jour dans la map
