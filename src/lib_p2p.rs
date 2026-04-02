@@ -226,7 +226,7 @@ pub async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, msg: Messa
 pub async fn send_and_wait_ack(socket: &UdpSocket, msg: &Message, dest: SocketAddr, ack_waiter: &AckWaiter, msg_id: u64) -> bool {
     let rx = ack_waiter.register(msg_id).await;   // register AVANT send
     let _ = socket.send_msg(msg, dest).await;
-    match timeout(Duration::from_secs(10), rx).await {
+    match timeout(Duration::from_secs(30), rx).await {
         Ok(Ok(())) => true,
         _ => { eprintln!("[ERROR] Timeout waiting for ack"); false }
     }
