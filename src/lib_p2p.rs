@@ -203,7 +203,7 @@ pub async fn delete_disconnected_peers(peers: &PeersMap) {
     let mut peers_map = peers.lock().await;
     peers_map.retain(|addr, (_, last_seen)| {
         let active = now_secs() - *last_seen < 120;
-        if !active { println!("[INFO] Peer {} disconnected (timeout)", addr); }
+        if !active { println!("[INFO] Connect with {} lost (timeout)", addr); }
         active
     });
 }
@@ -250,7 +250,7 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
         match hub_rx.recv().await {
             Some((Message::PeerInfo { peer_addr, peer_id: rid, .. }, _)) => {
                 println!("Received relay address {} ({})", peer_addr, rid);
-        		tokio::time::sleep(Duration::from_millis(500)).await;  // Attendre le hole punching chez le relais
+        		sleep(Duration::from_millis(2000)).await;  // Attendre le hole punching chez le relais
                 break (peer_addr, rid);
             }
             Some((Message::NoRelayAvailable { .. }, _)) => {

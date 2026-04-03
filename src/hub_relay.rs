@@ -58,11 +58,13 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 
             // Un peer cherche un relai : on lui en renvoie un
             Message::NeedRelay { header } => {
-                let relays = relays_list.lock().await;
-                let chosen_relay = relays
-			        .iter()
-			        .find(|(addr, _)| **addr != header.src_addr);
-                if let Some((relay_addr, (relay_id, _))) = chosen_relay {
+                let relay_info = {
+                    let relays = relays_list.lock().await;
+                    relays.iter()
+                        .find(|(addr, _)| **addr != header.src_addr)
+                        .map(|(addr, (id, _))| (*addr, id.clone()))
+                };
+                if let Some((relay_addr, relay_id)) = relay_info {
                     let msg = Message::PeerInfo {
                     	header: MessageHeader {
                     		msg_id: new_msg_id(),
@@ -72,8 +74,8 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 	                        dst_id: header.src_id.clone(),
 	                    	time: now_secs(),
 	                    },
-                        peer_addr: *relay_addr,
-                        peer_id: relay_id.to_string(),
+                        peer_addr: relay_addr,
+                        peer_id: relay_id.clone(),
                     };
                     let _ = socket.send_msg(&msg, header.src_addr).await;
 
@@ -83,14 +85,14 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
                     		msg_id: new_msg_id(),
 	                        src_addr: public_addr,
 	                        src_id: "hub".to_string(),
-	                        dst_addr: *relay_addr,
-	                        dst_id: relay_id.clone(),
+	                        dst_addr: relay_addr,
+	                        dst_id: relay_id,
 	                    	time: now_secs(),
                     	},
                         peer_addr: header.src_addr,
                         peer_id: header.src_id.clone(),
                     };
-                    let _ = socket.send_msg(&msg, *relay_addr).await;
+                    let _ = socket.send_msg(&msg, relay_addr).await;
                 } else {
                     let msg = Message::NoRelayAvailable {
                     	header: MessageHeader {
