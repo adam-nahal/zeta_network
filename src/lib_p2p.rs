@@ -3,7 +3,6 @@ use tokio::net::UdpSocket;
 use std::net::{SocketAddr, ToSocketAddrs};
 use clap::{Parser, Subcommand};
 use serde::{Serialize, Deserialize};
-use chrono::{DateTime, Utc};
 use anyhow::Result;
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::time::{sleep, timeout, Duration};
@@ -279,13 +278,6 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
 
     Some((relay_addr, relay_id))
 }
- 
-
-fn fmt_time(time: u64) -> String {
-    DateTime::<Utc>::from_timestamp(time as i64, 0)
-        .map(|dt| dt.format("%H:%M:%S").to_string())
-        .unwrap_or_else(|| format!("t={}", time))
-}
 
 static MSG_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -362,4 +354,11 @@ impl NodeDispatcher {
             }
         }
     }
+}
+
+fn fmt_time(time: u64) -> String {
+    let seconds = time % 60;
+    let minutes = (time / 60) % 60;
+    let hours = time / 3600;
+    format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
 }
