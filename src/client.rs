@@ -12,7 +12,6 @@ use crate::nat_detector::nat_detector;
 use crate::nat_detector::util::NatType::*;
 use crate::lib_p2p::*;
 
-
 pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {
     // Initialisation du noeud
     println!("\nLooking for NAT type...");
@@ -38,7 +37,7 @@ pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {
             user_and_relay(socket, public_addr, peer_id, hub_relay_addr).await;
         }
         _ => {  // SymmetricUdpFirewall or Symmetric
-            user_only(socket, public_addr, peer_id).await;
+            user_only(socket, public_addr, peer_id, hub_relay_addr).await;
         }
     }
 }
@@ -74,8 +73,13 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	        if let Message::Register { header } = &msg {
 	            connected_peers_clone.lock().await
 	                .entry(sender_addr)  // La clé existe-t-elle déjà ?
-	                .and_modify(|(_, t)| *t = header.time)
-	                .or_insert((header.src_id.clone(), header.time));
+	                .and_modify(|t| t.last_seen = header.time)
+	                .or_insert(PeerInfo {
+					    addr: header.src_addr,
+					    id: header.src_id.clone(),
+					    last_seen: header.time,
+					    is_relay: false,
+					});
 
 	            let msg = Message::Ack {
 		            header: MessageHeader {
@@ -129,17 +133,17 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	        // Répond aux demandes d'informations
 	        if let Message::AskForAddr { header, peer_id } = &msg {
 	            let map = connected_peers_clone.lock().await;  // lock d'abord
-	            if let Some((found_addr, _)) = map.iter().find(|(_, (id, _))| *id == *peer_id) {
+	            if let Some((_, peer_info)) = map.iter().find(|(_, peer_info)| peer_info.id == *peer_id) {
 	                let msg = Message::PeerInfo {
 	                	header: MessageHeader {
             				msg_id: new_msg_id(),
 			                src_addr: public_addr,
 			                src_id: recv_peer_id.clone(),
-			                dst_addr: header.src_addr,
+			                dst_addr: peer_info.addr,
 			                dst_id: header.src_id.clone(),
 			                time: now_secs(),
 	                	},
-	                    peer_addr: *found_addr,
+	                    peer_addr: peer_info.addr,
 	                    peer_id: peer_id.clone(),
 	                };
 	                drop(map);  // libère le lock avant le send
@@ -221,6 +225,5 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	std::future::pending::<()>().await;
 }
 
-pub async fn user_only(_socket: UdpSocket, _public_addr: SocketAddr, _peer_id: String) {
-        
+pub async fn user_only(_socket: UdpSocket, _public_addr: SocketAddr, _peer_id: String, _hub_relay_addr: SocketAddr) {
 }

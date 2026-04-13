@@ -11,7 +11,16 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 
-pub type PeersMap = Arc<Mutex<HashMap<SocketAddr, (String, u64)>>>; // un noeud = [Addr, (pseudo, derniere connection en secs)]
+
+#[derive(Debug, Clone)]
+pub struct PeerInfo {
+    pub addr: SocketAddr,
+    pub id: String,
+    pub last_seen: u64,
+    pub is_relay: bool,
+}
+
+pub type PeersMap = Arc<Mutex<HashMap<SocketAddr, PeerInfo>>>; // un noeud = [Addr, (pseudo, derniere connection en secs)]
 pub const MAX_PACKET_SIZE: usize = 4096;
 
 #[derive(Debug, Parser)]
@@ -174,7 +183,14 @@ pub async fn get_public_ip(socket: &UdpSocket) -> Result<SocketAddr> {
 
 pub async fn recv_msg(socket: &UdpSocket) -> Option<(Message, SocketAddr)> {
     let mut buf = [0; MAX_PACKET_SIZE];
-    let (size, sender_addr) = socket.recv_from(&mut buf).await.expect("Nothing received");
+    let (size, sender_addr) = match socket.recv_from(&mut buf).await {
+        Ok(res) => res,
+        Err(e) => {
+            eprintln!("[WARN] recv_from failed: {}", e);
+            return None;
+        }
+    };
+
     if size == 0 || size >= MAX_PACKET_SIZE {
         println!("The message's size is incorrect({})", size);
         return None;
@@ -200,17 +216,17 @@ pub fn now_secs() -> u64 {
 
 pub async fn delete_disconnected_peers(peers: &PeersMap) {
     let mut peers_map = peers.lock().await;
-    peers_map.retain(|addr, (_, last_seen)| {
-        let active = now_secs() - *last_seen < 120;
+    peers_map.retain(|addr, peer_info| {
+        let active = now_secs() - peer_info.last_seen < 120;
         if !active { println!("[INFO] Connect with {} lost (timeout)", addr); }
         active
     });
 }
 
 pub async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, msg: Message, socket: &UdpSocket) {
-    let mut peers_map = peers.lock().await;
+    let peers_map = peers.lock().await;
 
-    for (other_addr, _) in peers_map.iter_mut() {
+    for (other_addr, _) in peers_map.iter() {
         if other_addr != &sender_addr {
             if let Err(e) = socket.send_msg(&msg, *other_addr).await {
                 eprintln!("Failed to send to {}: {}", other_addr, e);
@@ -233,14 +249,14 @@ pub async fn send_and_wait_ack(socket: &UdpSocket, msg: &Message, dest: SocketAd
 
 pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, peer_id: &str, hub_relay_addr: SocketAddr, hub_rx: &mut MsgReceiver, ack_waiter: &AckWaiter) -> Option<(SocketAddr, String)> {
     let (relay_addr, relay_id) = loop {
-        println!("Asking the hub relay an available relay...");
+        println!("\nAsking the hub relay an available relay...");
         let msg = Message::NeedRelay {
             header: MessageHeader {
                 msg_id:   new_msg_id(),
                 src_addr: public_addr,
                 src_id:   peer_id.to_string(),
                 dst_addr: hub_relay_addr,
-                dst_id:   "hubrelay".to_string(),
+                dst_id:   "hub".to_string(),
                 time:     now_secs(),
             }
         };
@@ -332,8 +348,8 @@ pub fn create_node_channels() -> (NodeDispatcher, NodeInbox) {
     let (hub_tx,     hub_rx)     = mpsc::channel(32);
     let (general_tx, general_rx) = mpsc::channel(256);
     (
-        NodeDispatcher { ack_waiter: ack_waiter.clone(), hub_tx, general_tx },
-        NodeInbox      { ack_waiter,                     hub_rx, general_rx },
+        NodeDispatcher { ack_waiter: ack_waiter.clone(), hub_tx, general_tx },  // Envoie (redirigé vers dispatcher)
+        NodeInbox      { ack_waiter,                     hub_rx, general_rx },  // Réception des messages
     )
 }
 
@@ -359,6 +375,6 @@ impl NodeDispatcher {
 fn fmt_time(time: u64) -> String {
     let seconds = time % 60;
     let minutes = (time / 60) % 60;
-    let hours = time / 3600;
+    let hours = (time / 3600) % 24;
     format!("{:02}:{:02}:{:02}", hours, minutes, seconds)
 }

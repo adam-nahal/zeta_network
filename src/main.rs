@@ -4,6 +4,7 @@ mod client;
 mod nat_detector;
 mod lib_p2p;
 mod hub_relay;
+mod db;
 
 use crate::lib_p2p::*;
 
