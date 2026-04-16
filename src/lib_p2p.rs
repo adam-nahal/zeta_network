@@ -70,21 +70,6 @@ pub struct Message {
     pub payload: Payload,
 }
 
-#[async_trait::async_trait]
-pub trait UdpSocketExt {
-    async fn send_msg(&self, msg: &Message, next_hop: SocketAddr) -> Result<usize>;
-}
-
-#[async_trait::async_trait]
-impl UdpSocketExt for UdpSocket {
-    async fn send_msg(&self, msg: &Message, next_hop: SocketAddr) -> Result<usize> {
-        let encoded = bincode::serialize(&msg)?;
-        let size = self.send_to(&encoded, next_hop).await?;
-		println!("->{}", msg);
-		Ok(size)
-    }
-}
-
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.payload {
@@ -135,6 +120,21 @@ impl fmt::Display for Headers {
             self.msg_id,
             fmt_time(self.time)
         )
+    }
+}
+
+#[async_trait::async_trait]
+pub trait UdpSocketExt {
+    async fn send_msg(&self, msg: &Message, next_hop: SocketAddr) -> Result<usize>;
+}
+
+#[async_trait::async_trait]
+impl UdpSocketExt for UdpSocket {
+    async fn send_msg(&self, msg: &Message, next_hop: SocketAddr) -> Result<usize> {
+        let encoded = bincode::serialize(&msg)?;
+        let size = self.send_to(&encoded, next_hop).await?;
+		println!("->{}", msg);
+		Ok(size)
     }
 }
 
@@ -331,10 +331,10 @@ impl NodeDispatcher {
         loop {
             let Some((msg, addr)) = recv_msg(&socket).await else { continue };
             match &msg.payload {
-                Payload::Ack { reply_to, .. } => {
+                Payload::Ack { reply_to } => {
                     self.ack_waiter.resolve(*reply_to).await;
                 }
-                Payload::PeerInfo { .. } | Payload::NoRelayAvailable { .. } => {
+                Payload::PeerInfo { .. } | Payload::NoRelayAvailable => {
                     let _ = self.hub_tx.send((msg, addr)).await;
                 }
                 _ => {

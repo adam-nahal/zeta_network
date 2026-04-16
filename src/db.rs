@@ -34,7 +34,7 @@ impl DbManager {
                 dst_addr TEXT NOT NULL,
                 dst_id TEXT NOT NULL,
                 msg_type TEXT NOT NULL,
-                content TEXT
+                payload TEXT
             )",
             [],
         )?;
@@ -156,12 +156,12 @@ impl DbManager {
 	    let tx = conn.transaction()?;
 
         for log in logs2.iter() {
-	        let (msg_type, content) = match &log.payload {
+	        let (msg_type, payload) = match &log.payload {
 	            Payload::Classic { txt } => ("Classic", Some(txt.clone())),
-	            _ => (std::any::type_name_of_val(log), None),
+	            _ => continue,
 	        };
 	        tx.execute(
-	            "INSERT OR REPLACE INTO logs (time, src_addr, src_id, dst_addr, dst_id, msg_type, content)
+	            "INSERT OR REPLACE INTO logs (time, src_addr, src_id, dst_addr, dst_id, msg_type, payload)
 	             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
 	            params![
 	                log.headers.time,
@@ -170,7 +170,7 @@ impl DbManager {
 	                log.headers.dst_addr.to_string(),
 	                log.headers.dst_id,
 	                msg_type,
-	                content,
+	                payload,
 	            ],
 	        )?;
 	    }
