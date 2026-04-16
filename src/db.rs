@@ -171,7 +171,7 @@ impl DbManager {
 	        };
 	        tx.execute(
 	            "INSERT OR REPLACE INTO logs (msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload)
-	             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+	             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
 	            params![
 	                log.headers.msg_id,
 	                log.headers.time,
