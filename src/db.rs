@@ -158,7 +158,16 @@ impl DbManager {
         for log in logs2.iter() {
 	        let (msg_type, payload) = match &log.payload {
 	            Payload::Classic { txt } => ("Classic", Some(txt.clone())),
-	            _ => continue,
+			    Payload::Ack { reply_to } => ("Ack", Some(reply_to.to_string())),
+			    Payload::PeerInfo { peer_addr, peer_id } => ("PeerInfo", Some(format!("{}|{}", peer_addr, peer_id))),
+			    Payload::RelayHasNewClient { peer_addr, peer_id } => ("RelayHasNewClient", Some(format!("{}|{}", peer_addr, peer_id))),
+			    Payload::AskForAddr { peer_id } => ("AskForAddr", Some(peer_id.clone())),
+			    Payload::Register => ("Register", None),
+			    Payload::Connect => ("Connect", None),
+			    Payload::BeNewRelay => ("BeNewRelay", None),
+			    Payload::NeedRelay => ("NeedRelay", None),
+			    Payload::NoRelayAvailable => ("NoRelayAvailable", None),
+			    Payload::PunchTheHole => ("PunchTheHole", None),
 	        };
 	        tx.execute(
 	            "INSERT OR REPLACE INTO logs (time, src_addr, src_id, dst_addr, dst_id, msg_type, payload)
