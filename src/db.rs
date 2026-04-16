@@ -45,33 +45,16 @@ impl DbManager {
         })
     }
 
-    // Insère ou met à jour un noeud
-    pub async fn upsert_peer(&self, addr: SocketAddr, id: &str, last_seen: u64) -> Result<()> {
-        let conn = self.conn.lock().await;
-        conn.execute(
-            "INSERT OR REPLACE INTO peers (addr, id, last_seen, is_relay) VALUES (?1, ?2, ?3, 1)",
-            params![addr.to_string(), id, last_seen],
-        )?;
-        Ok(())
-    }
-
-    // Supprime un noeud (quand il est inactif)
-    pub async fn delete_one_peer(&self, addr: SocketAddr) -> Result<()> {
-        let conn = self.conn.lock().await;
-        conn.execute("DELETE FROM peers WHERE addr = ?1", params![addr.to_string()])?;
-        Ok(())
-    }
-
-	pub async fn get_all_peers(&self) -> Result<Vec<PeerInfo>> {
+	pub async fn get_peers_from_db(&self) -> Result<PeersMap> {
 	    let conn = self.conn.lock().await;
 	    let mut stmt = conn.prepare("SELECT addr, id, last_seen, is_relay FROM peers")?;
 	    let mut rows = stmt.query([])?;
-	    let mut peers = Vec::new();
+	    let peers = Arc::new(Mutex::new(HashMap::new()));
 	    while let Some(row) = rows.next()? {
 	        let addr_str: String = row.get(0)?;
 	        let addr = addr_str.parse::<SocketAddr>()
 	            .map_err(|_| rusqlite::Error::InvalidColumnType(0, "SocketAddr".to_string(), rusqlite::types::Type::Text))?;
-	        peers.push(PeerInfo {
+	        peers.lock().await.insert(addr, PeerInfo {
 	            addr,
 	            id: row.get(1)?,
 	            last_seen: row.get(2)?,
@@ -81,82 +64,118 @@ impl DbManager {
 	    Ok(peers)
 	}
 
-	pub async fn get_all_logs(&self) -> Result<Vec<PeerInfo>> {
+	pub async fn get_logs_from_db(&self) -> Result<MessagesMap> {
 	    let conn = self.conn.lock().await;
-	    let mut stmt = conn.prepare("SELECT addr, id, last_seen, is_relay FROM peers")?;
+	    let mut stmt = conn.prepare(
+	        "SELECT msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload FROM logs"
+	    )?;
 	    let mut rows = stmt.query([])?;
-	    let mut peers = Vec::new();
+	    let logs = Arc::new(Mutex::new(Vec::new()));
 	    while let Some(row) = rows.next()? {
-	        let addr_str: String = row.get(0)?;
-	        let addr = addr_str.parse::<SocketAddr>()
-	            .map_err(|_| rusqlite::Error::InvalidColumnType(0, "SocketAddr".to_string(), rusqlite::types::Type::Text))?;
-	        peers.push(PeerInfo {
-	            addr,
-	            id: row.get(1)?,
-	            last_seen: row.get(2)?,
-	            is_relay: row.get(3)?,
+	        let src_str: String = row.get(2)?;
+	        let dst_str: String = row.get(4)?;
+	        let msg_type: String = row.get(6)?;
+	        let payload_str: Option<String> = row.get(7)?;
+
+	        let payload = match (msg_type.as_str(), payload_str.as_deref()) {
+	            ("Classic", Some(txt))         => Payload::Classic { txt: txt.to_string() },
+	            ("AskForAddr", Some(peer_id))  => Payload::AskForAddr { peer_id: peer_id.to_string() },
+	            ("Ack", Some(s))               => Payload::Ack { reply_to: s.parse().unwrap_or(0) },
+	            ("PeerInfo", Some(s))          => {
+	                let mut parts = s.splitn(2, '|');
+	                let peer_addr = parts.next().unwrap_or("0.0.0.0:0").parse().unwrap();
+	                let peer_id   = parts.next().unwrap_or("").to_string();
+	                Payload::PeerInfo { peer_addr, peer_id }
+	            }
+	            ("RelayHasNewClient", Some(s)) => {
+	                let mut parts = s.splitn(2, '|');
+	                let peer_addr = parts.next().unwrap_or("0.0.0.0:0").parse().unwrap();
+	                let peer_id   = parts.next().unwrap_or("").to_string();
+	                Payload::RelayHasNewClient { peer_addr, peer_id }
+	            }
+	            ("Register", _)          => Payload::Register,
+	            ("Connect", _)           => Payload::Connect,
+	            ("BeNewRelay", _)        => Payload::BeNewRelay,
+	            ("NeedRelay", _)         => Payload::NeedRelay,
+	            ("NoRelayAvailable", _)  => Payload::NoRelayAvailable,
+	            ("PunchTheHole", _)      => Payload::PunchTheHole,
+	            _                        => continue,
+	        };
+
+	        logs.lock().await.push(Message {
+	            headers: Headers {
+	                msg_id:   row.get(0)?,
+	                time:     row.get(1)?,
+	                src_addr: src_str.parse().map_err(|_| rusqlite::Error::InvalidColumnType(2, "SocketAddr".into(), rusqlite::types::Type::Text))?,
+	                src_id:   row.get(3)?,
+	                dst_addr: dst_str.parse().map_err(|_| rusqlite::Error::InvalidColumnType(4, "SocketAddr".into(), rusqlite::types::Type::Text))?,
+	                dst_id:   row.get(5)?,
+	            },
+	            payload,
 	        });
 	    }
-	    Ok(peers)
+	    Ok(logs)
 	}
 
-pub async fn refresh_peers(&self, peer_map: Arc<Mutex<HashMap<SocketAddr, PeerInfo>>>) -> Result<()> {
-    let peers_guard = peer_map.lock().await;
-    let mut conn = self.conn.lock().await;
-    let tx = conn.transaction()?;
+	pub async fn refresh_peers(&self, peer_map: PeersMap) -> Result<()> {
+	    let peers_guard = peer_map.lock().await;
+	    let mut conn = self.conn.lock().await;
+	    let tx = conn.transaction()?;  // Permet l'atomicité du refresh (soit tout est maj, soit rien)
 
-    for (addr, peer_info) in peers_guard.iter() {
-        tx.execute(
-            "INSERT INTO peers (addr, id, last_seen, is_relay)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(addr) DO UPDATE SET
-                 id = excluded.id,
-                 last_seen = excluded.last_seen,
-                 is_relay = excluded.is_relay",
-            params![addr.to_string(), peer_info.id, peer_info.last_seen, peer_info.is_relay],
-        )?;
-    }
+	    // Ajoute ou met à jour les noeuds de la base de données
+	    for (addr, peer_info) in peers_guard.iter() {
+	        tx.execute(
+	            "INSERT INTO peers (addr, id, last_seen, is_relay)
+	             VALUES (?1, ?2, ?3, ?4)
+	             ON CONFLICT(addr) DO UPDATE SET
+	                 id = excluded.id,
+	                 last_seen = excluded.last_seen,
+	                 is_relay = excluded.is_relay",
+	            params![addr.to_string(), peer_info.id, peer_info.last_seen, peer_info.is_relay],
+	        )?;
+	    }
 
-    let placeholders = peers_guard
-        .keys()
-        .enumerate()
-        .map(|(i, _)| format!("?{}", i + 1))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let addrs: Vec<String> = peers_guard.keys().map(|a| a.to_string()).collect();
-    let query = format!("DELETE FROM peers WHERE addr NOT IN ({})", placeholders);
-    tx.execute(&query, rusqlite::params_from_iter(addrs.iter()))?;
+	    // Supprime les noeuds déconnectés ou anciens
+	    let placeholders = peers_guard
+	        .keys()
+	        .enumerate()
+	        .map(|(i, _)| format!("?{}", i + 1))
+	        .collect::<Vec<_>>()
+	        .join(", ");
+	    let addrs: Vec<String> = peers_guard.keys().map(|a| a.to_string()).collect();
+	    let query = format!("DELETE FROM peers WHERE addr NOT IN ({})", placeholders);
+	    tx.execute(&query, rusqlite::params_from_iter(addrs.iter()))?;
 
-    tx.commit()?;
-    Ok(())
-}
+	    tx.commit()?;
+	    Ok(())
+	}
 
-    // Journaliser un message
-    pub async fn refresh_logs(&self, msg: &crate::lib_p2p::Message, src_addr: SocketAddr, dst_addr: SocketAddr, timestamp: u64) -> Result<()> {
-        let conn = self.conn.lock().await;
-        let (msg_type, content) = match msg {
-            crate::lib_p2p::Message::Classic { txt, .. } => ("Classic", Some(txt.clone())),
-            _ => (std::any::type_name_of_val(msg), None),
-        };
-        // Extraire les IDs depuis le header selon le type de message (simplifié)
-        let (src_id, dst_id) = match msg {
-            crate::lib_p2p::Message::Register { header } | crate::lib_p2p::Message::Connect { header } | crate::lib_p2p::Message::BeNewRelay { header } => 
-                (header.src_id.clone(), header.dst_id.clone()),
-            _ => ("?".to_string(), "?".to_string()),
-        };
-        conn.execute(
-            "INSERT INTO logs (timestamp, src_addr, src_id, dst_addr, dst_id, msg_type, content)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                timestamp,
-                src_addr.to_string(),
-                src_id,
-                dst_addr.to_string(),
-                dst_id,
-                msg_type,
-                content,
-            ],
-        )?;
-        Ok(())
+    pub async fn refresh_logs(&self, logs: MessagesMap) -> Result<()> {
+	    let logs2 = logs.lock().await;
+        let mut conn = self.conn.lock().await;
+	    let tx = conn.transaction()?;
+
+        for log in logs2.iter() {
+	        let (msg_type, content) = match &log.payload {
+	            Payload::Classic { txt } => ("Classic", Some(txt.clone())),
+	            _ => (std::any::type_name_of_val(log), None),
+	        };
+	        tx.execute(
+	            "INSERT OR REPLACE INTO logs (time, src_addr, src_id, dst_addr, dst_id, msg_type, content)
+	             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+	            params![
+	                log.headers.time,
+	                log.headers.src_addr.to_string(),
+	                log.headers.src_id,
+	                log.headers.dst_addr.to_string(),
+	                log.headers.dst_id,
+	                msg_type,
+	                content,
+	            ],
+	        )?;
+	    }
+
+	    tx.commit()?;
+    	Ok(())
     }
 }

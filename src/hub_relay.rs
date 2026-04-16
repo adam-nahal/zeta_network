@@ -1,8 +1,6 @@
 use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
 use tokio::time::{Duration, sleep};
 use std::sync::Arc;
-use std::collections::HashMap;
 use std::net::SocketAddr;
 
 use crate::db::*;
@@ -23,18 +21,8 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 	let db = DbManager::new("hub_relay.db").await.expect("Cannot open the database");
 
 	// Importe les données de la base de données vers le programme
-	let peers_in_db = db.get_all_peers().await.unwrap_or_default();
-    let relays_list: PeersMap = Arc::new(Mutex::new(HashMap::new()));
-    for peer in peers_in_db {
-    	if peer.is_relay {
-	        relays_list.lock().await.insert(peer.addr, PeerInfo {
-	        	addr: peer.addr,
-	        	id: peer.id, 
-	        	last_seen: peer.last_seen, 
-	        	is_relay: peer.is_relay
-	        });
-	    }
-    }
+	let relays_list: PeersMap = db.get_peers_from_db().await.unwrap_or_default();
+	let logs: MessagesMap = db.get_logs_from_db().await.unwrap_or_default();
 
     // Suppression automatique des noeuds inactifs
     tokio::spawn({
@@ -54,7 +42,8 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 	    async move {
 	        loop {
 	            sleep(Duration::from_secs(5)).await;
-	            db.refresh_peers(Arc::clone(&relays_list)).await;
+	            let _ = db.refresh_peers(Arc::clone(&relays_list)).await;
+	            let _ = db.refresh_logs(Arc::clone(&logs)).await;
 	        }
 	    }
 	});
@@ -62,60 +51,59 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 	loop {
 		let Some((msg, sender_addr)) = recv_msg(&socket).await else {continue};
 		
-		match &msg {
+		match &msg.payload {
 			// Un relai se déclare : on l'ajoute/met à jour dans la map
-			Message::BeNewRelay { header } => {
+			Payload::BeNewRelay => {
 				relays_list.lock().await
-					.entry(header.src_addr)
-					.and_modify(|peer_info| peer_info.last_seen = header.time)
+					.entry(msg.headers.src_addr)
+					.and_modify(|peer_info| peer_info.last_seen = msg.headers.time)
 					.or_insert(PeerInfo {
-					    addr: header.src_addr,
-					    id: header.src_id.clone(),
-					    last_seen: header.time,
+					    addr: msg.headers.src_addr,
+					    id: msg.headers.src_id.clone(),
+					    last_seen: msg.headers.time,
 					    is_relay: true,
 					});
 
 				// On accuse réception
-				let msg = Message::Ack {
-					header: MessageHeader {
+				let msg = Message {
+					headers: Headers {
 						msg_id: new_msg_id(),
 						src_addr: public_addr,
 						src_id: peer_id.clone(),
-						dst_addr: header.src_addr,
-						dst_id: header.src_id.clone(),
+						dst_addr: msg.headers.src_addr,
+						dst_id: msg.headers.src_id.clone(),
 						time: now_secs(),                		
 					},
-					reply_to: header.msg_id
+					payload: Payload::Ack { reply_to: msg.headers.msg_id }
 				};
 				let _ = socket.send_msg(&msg, sender_addr).await;
 			}
 
 			// Un peer cherche un relai : on lui en renvoie un
-			Message::NeedRelay { header } => {
+			Payload::NeedRelay => {
 				let relay_info = {
 					let relays = relays_list.lock().await;
 					relays.iter()
-						.find(|(addr, _)| **addr != header.src_addr)
+						.find(|(addr, _)| **addr != msg.headers.src_addr)
 						.map(|(addr, peer_info)| (*addr, peer_info.id.clone()))
 				};
 				if let Some((relay_addr, relay_id)) = relay_info {
-					let msg = Message::PeerInfo {
-						header: MessageHeader {
+					let msg = Message {
+						headers: Headers {
 							msg_id: new_msg_id(),
 							src_addr: public_addr,
 							src_id: "hub".to_string(),
-							dst_addr: header.src_addr,
-							dst_id: header.src_id.clone(),
+							dst_addr: msg.headers.src_addr,
+							dst_id: msg.headers.src_id.clone(),
 							time: now_secs(),
 						},
-						peer_addr: relay_addr,
-						peer_id: relay_id.clone(),
+						payload: Payload::PeerInfo { peer_addr: relay_addr, peer_id: relay_id.clone() }
 					};
-					let _ = socket.send_msg(&msg, header.src_addr).await;
+					let _ = socket.send_msg(&msg, msg.headers.src_addr).await;
 
 					// Avertissons le relais concerné
-					let msg = Message::RelayHasNewClient {
-						header: MessageHeader {
+					let msg = Message {
+						headers: Headers {
 							msg_id: new_msg_id(),
 							src_addr: public_addr,
 							src_id: "hub".to_string(),
@@ -123,22 +111,22 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 							dst_id: relay_id,
 							time: now_secs(),
 						},
-						peer_addr: header.src_addr,
-						peer_id: header.src_id.clone(),
+						payload: Payload::RelayHasNewClient { peer_addr: msg.headers.src_addr, peer_id: msg.headers.src_id.clone()},
 					};
 					let _ = socket.send_msg(&msg, relay_addr).await;
 				} else {
-					let msg = Message::NoRelayAvailable {
-						header: MessageHeader {
+					let msg = Message {
+						headers: Headers {
 							msg_id: new_msg_id(),
 							src_addr: public_addr,
 							src_id: "hub".to_string(),
-							dst_addr: header.src_addr,
-							dst_id: header.src_id.clone(),
+							dst_addr: msg.headers.src_addr,
+							dst_id: msg.headers.src_id.clone(),
 							time: now_secs(),
 						},
+						payload: Payload::NoRelayAvailable
 					};
-					let _ = socket.send_msg(&msg, header.src_addr).await;
+					let _ = socket.send_msg(&msg, msg.headers.src_addr).await;
 				}
 			}
 			_ => println!("Unexpected message: '{}'", msg)
