@@ -170,9 +170,10 @@ impl DbManager {
 			    Payload::PunchTheHole => ("PunchTheHole", None),
 	        };
 	        tx.execute(
-	            "INSERT OR REPLACE INTO logs (time, src_addr, src_id, dst_addr, dst_id, msg_type, payload)
+	            "INSERT OR REPLACE INTO logs (msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload)
 	             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
 	            params![
+	                log.headers.msg_id,
 	                log.headers.time,
 	                log.headers.src_addr.to_string(),
 	                log.headers.src_id,
