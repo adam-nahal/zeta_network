@@ -10,6 +10,8 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::db::*;
+
 
 
 #[derive(Debug, Clone)]
@@ -275,6 +277,13 @@ static MSG_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub fn new_msg_id() -> u64 {
     MSG_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+pub async fn init_msg_id(db: &DbManager) -> u64 {
+    let max_id = db.get_max_msg_id().await.unwrap_or(0);
+    let init_val = if max_id == 0 { 1 } else { max_id + 1 };
+    MSG_COUNTER.store(init_val, Ordering::Relaxed);
+    init_val
 }
 
 #[derive(Clone)]
