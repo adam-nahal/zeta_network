@@ -43,8 +43,13 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 	    async move {
 	        loop {
 	            sleep(Duration::from_secs(5)).await;
-	            let _ = db.refresh_peers(Arc::clone(&relays_list)).await;
-	            let _ = db.refresh_logs(Arc::clone(&logs)).await;
+
+	            if let Err(e) = db.refresh_peers(Arc::clone(&relays_list)).await {
+				    eprintln!("[ERROR] refresh_peers failed: {}", e);
+				}
+	            if let Err(e) = db.refresh_logs(Arc::clone(&logs)).await {
+				    eprintln!("[ERROR] refresh_logs failed: {}", e);
+				}
 	        }
 	    }
 	});
