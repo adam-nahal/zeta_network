@@ -34,7 +34,8 @@ impl DbManager {
                 dst_addr TEXT NOT NULL,
                 dst_id TEXT NOT NULL,
                 msg_type TEXT NOT NULL,
-                payload TEXT
+                payload TEXT,
+                last_hop TEXT NOT NULL
             )",
             [],
         )?;
@@ -72,8 +73,6 @@ impl DbManager {
 	    let mut rows = stmt.query([])?;
 	    let logs = Arc::new(Mutex::new(Vec::new()));
 	    while let Some(row) = rows.next()? {
-	        let src_str: String = row.get(2)?;
-	        let dst_str: String = row.get(4)?;
 	        let msg_type: String = row.get(6)?;
 	        let payload_str: Option<String> = row.get(7)?;
 
@@ -106,12 +105,13 @@ impl DbManager {
 	            headers: Headers {
 	                msg_id:   row.get(0)?,
 	                time:     row.get(1)?,
-	                src_addr: src_str.parse().map_err(|_| rusqlite::Error::InvalidColumnType(2, "SocketAddr".into(), rusqlite::types::Type::Text))?,
+	                src_addr: row.get::<_, String>(2)?.parse().map_err(|_| rusqlite::Error::InvalidColumnType(2, "SocketAddr".into(), rusqlite::types::Type::Text))?,
 	                src_id:   row.get(3)?,
-	                dst_addr: dst_str.parse().map_err(|_| rusqlite::Error::InvalidColumnType(4, "SocketAddr".into(), rusqlite::types::Type::Text))?,
+	                dst_addr: row.get::<_, String>(4)?.parse().map_err(|_| rusqlite::Error::InvalidColumnType(4, "SocketAddr".into(), rusqlite::types::Type::Text))?,
 	                dst_id:   row.get(5)?,
 	            },
 	            payload,
+	            last_hop: row.get::<_, String>(8)?.parse().map_err(|_| rusqlite::Error::InvalidColumnType(4, "SocketAddr".into(), rusqlite::types::Type::Text))?,
 	        });
 	    }
 	    Ok(logs)
@@ -170,8 +170,8 @@ impl DbManager {
 			    Payload::PunchTheHole => ("PunchTheHole", None),
 	        };
 	        tx.execute(
-	            "INSERT OR REPLACE INTO logs (msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload)
-	             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+	            "INSERT OR REPLACE INTO logs (msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload, last_hop)
+	             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
 	            params![
 	                log.headers.msg_id,
 	                log.headers.time,
@@ -181,6 +181,7 @@ impl DbManager {
 	                log.headers.dst_id,
 	                msg_type,
 	                payload,
+	                log.last_hop.to_string(),
 	            ],
 	        )?;
 	    }

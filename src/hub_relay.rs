@@ -38,8 +38,8 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
     // Actualisation de la base de données
 	tokio::spawn({
 	    let relays_list = Arc::clone(&relays_list);
+	    let logs = Arc::clone(&logs);
 	    let db = db.clone();
-	    let logs = logs.clone();
 	    async move {
 	        loop {
 	            sleep(Duration::from_secs(5)).await;
@@ -81,9 +81,11 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 						dst_id: msg_rcv.headers.src_id.clone(),
 						time: now_secs(),                		
 					},
-					payload: Payload::Ack { reply_to: msg_rcv.headers.msg_id }
+					payload: Payload::Ack { reply_to: msg_rcv.headers.msg_id },
+					last_hop: public_addr,
 				};	
 				let _ = socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
+				logs.lock().await.push(msg);
 			}
 
 			// Un peer cherche un relai : on lui en renvoie un
@@ -104,9 +106,11 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 							dst_id: msg_rcv.headers.src_id.clone(),
 							time: now_secs(),
 						},
-						payload: Payload::PeerInfo { peer_addr: relay_addr, peer_id: relay_id.clone() }
+						payload: Payload::PeerInfo { peer_addr: relay_addr, peer_id: relay_id.clone() },
+						last_hop: public_addr,
 					};
 					let _ = socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
+					logs.lock().await.push(msg);
 
 					// Avertissons le relais concerné
 					let msg = Message {
@@ -119,8 +123,10 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 							time: now_secs(),
 						},
 						payload: Payload::RelayHasNewClient { peer_addr: msg_rcv.headers.src_addr, peer_id: msg_rcv.headers.src_id.clone()},
+						last_hop: public_addr,
 					};
 					let _ = socket.send_msg(&msg, relay_addr).await;
+					logs.lock().await.push(msg);
 				} else {
 					let msg = Message {
 						headers: Headers {
@@ -131,9 +137,11 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 							dst_id: msg_rcv.headers.src_id.clone(),
 							time: now_secs(),
 						},
-						payload: Payload::NoRelayAvailable
+						payload: Payload::NoRelayAvailable,
+						last_hop: public_addr,
 					};
 					let _ = socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
+					logs.lock().await.push(msg);
 				}
 			}
 			_ => println!("Unexpected message: '{}'", msg_rcv)

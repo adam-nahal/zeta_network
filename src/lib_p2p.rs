@@ -68,6 +68,7 @@ pub enum Payload {
 pub struct Message {
     pub headers: Headers,
     pub payload: Payload,
+    pub last_hop: SocketAddr,
 }
 
 impl fmt::Display for Message {
@@ -227,7 +228,8 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
                 dst_id:   "hub".to_string(),
                 time:     now_secs(),
             },
-            payload: Payload::NeedRelay
+            payload: Payload::NeedRelay,
+            last_hop: public_addr,
         };
         let _ = socket.send_msg(&msg, hub_relay_addr).await;
 
@@ -258,7 +260,8 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
             dst_id:   relay_id.clone(),
             time:     now_secs(),
         },
-        payload: Payload::Register
+        payload: Payload::Register,
+        last_hop: public_addr,
     };
     if !send_and_wait_ack(&socket, &msg, relay_addr, ack_waiter, msg_id).await {
         println!("[ERROR] No ack from relay, aborting");

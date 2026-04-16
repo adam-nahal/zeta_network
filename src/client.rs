@@ -91,6 +91,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		                time:     now_secs(),
 		            },
 		            payload: Payload::Ack { reply_to: msg_rcv.headers.msg_id },
+					last_hop: public_addr,
 		        };
 		        let _ = recv_socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
 	        }
@@ -125,7 +126,8 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		                dst_id: client_id.to_string(),
 		                time: now_secs(),
 	            	},
-	            	payload: Payload::PunchTheHole
+	            	payload: Payload::PunchTheHole,
+					last_hop: public_addr,
 	            };
 	            let _ = recv_socket.send_msg(&msg, *peer_addr).await;
 	            
@@ -144,7 +146,8 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 			                dst_id: msg_rcv.headers.src_id.clone(),
 			                time: now_secs(),
 	                	},
-	                	payload: Payload::PeerInfo { peer_addr: peer_info.addr, peer_id: peer_id.clone() }
+	                	payload: Payload::PeerInfo { peer_addr: peer_info.addr, peer_id: peer_id.clone() },
+						last_hop: public_addr,
 	                };
 	                drop(map);  // libère le lock avant le send
 	                let _ = recv_socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
@@ -167,7 +170,8 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	        dst_id: "hub".to_string(),
 	        time: now_secs(),
 	    },
-	    payload: Payload::BeNewRelay
+	    payload: Payload::BeNewRelay,
+		last_hop: public_addr,
     };
     if !send_and_wait_ack(&socket, &msg, hub_relay_addr, &ack_waiter, msg_id).await {
 	    return;
@@ -209,7 +213,8 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		                    dst_id: "all".to_string(),
 		                    time: now_secs(),
 	                	},
-	                	payload: Payload::Classic { txt: msg_text.to_string() }
+	                	payload: Payload::Classic { txt: msg_text.to_string() },
+	                	last_hop: public_addr,
 	                };
 	                let _ = send_socket.send_msg(&msg, relay_addr).await;
 	            }
