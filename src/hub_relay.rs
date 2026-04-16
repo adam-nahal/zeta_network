@@ -29,8 +29,8 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 	    let relays_list = Arc::clone(&relays_list);
 	    async move {
 	        loop {
-	            sleep(Duration::from_secs(10)).await;
 	            delete_disconnected_peers(&relays_list).await;
+	            sleep(Duration::from_secs(10)).await;
 	        }
 	    }
 	});
