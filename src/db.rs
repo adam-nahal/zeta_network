@@ -35,7 +35,8 @@ impl DbManager {
                 dst_id TEXT NOT NULL,
                 msg_type TEXT NOT NULL,
                 payload TEXT,
-                last_hop TEXT NOT NULL
+                last_hop TEXT NOT NULL,
+                UNIQUE(msg_id, time, src_id)
             )",
             [],
         )?;
@@ -170,7 +171,7 @@ impl DbManager {
 			    Payload::PunchTheHole => ("PunchTheHole", None),
 	        };
 	        tx.execute(
-	            "INSERT OR REPLACE INTO logs (msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload, last_hop)
+	            "INSERT OR IGNORE INTO logs (msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload, last_hop)
 	             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
 	            params![
 	                log.headers.msg_id,
