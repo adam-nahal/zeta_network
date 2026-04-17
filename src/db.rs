@@ -69,7 +69,7 @@ impl DbManager {
 	pub async fn get_logs_from_db(&self) -> Result<MessagesMap> {
 	    let conn = self.conn.lock().await;
 	    let mut stmt = conn.prepare(
-	        "SELECT msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload FROM logs"
+	        "SELECT msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload, last_hop FROM logs"
 	    )?;
 	    let mut rows = stmt.query([])?;
 	    let logs = Arc::new(Mutex::new(Vec::new()));
