@@ -30,7 +30,7 @@ impl UdpSocketExt for UdpSocket {
 	    let _ = self.send_msg(msg, dest, logs).await;
 	    match timeout(Duration::from_secs(10), rx).await {
 	        Ok(Ok(())) => true,
-	        _ => { eprintln!("[TIMEOUT] No acks reveiced"); false }
+	        _ => { eprintln!("[TIMEOUT] No acks received"); false }
 	    }
 	}
 }
