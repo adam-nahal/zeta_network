@@ -2,11 +2,11 @@ use std::net::SocketAddr;
 use clap::Parser;
 mod client;
 mod nat_detector;
-mod lib_p2p;
+mod p2p;
 mod hub_relay;
 mod db;
 
-use crate::lib_p2p::*;
+use crate::p2p::*;
 
 
 #[tokio::main]

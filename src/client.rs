@@ -7,7 +7,7 @@ use std::io::Write;
 
 use crate::nat_detector::nat_detector;
 use crate::nat_detector::util::NatType::*;
-use crate::lib_p2p::*;
+use crate::p2p::*;
 use crate::db::*;
 
 pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {

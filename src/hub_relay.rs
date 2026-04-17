@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::net::SocketAddr;
 
 use crate::db::*;
-use crate::lib_p2p::*;
+use crate::p2p::*;
 
 
 pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {

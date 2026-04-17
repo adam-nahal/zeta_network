@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::net::SocketAddr;
 
-use crate::lib_p2p::*;
+use crate::p2p::*;
 
 // Gestionnaire de base de données (thread-safe)
 #[derive(Clone)]
