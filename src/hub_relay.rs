@@ -17,22 +17,20 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 		return;
 	}
 
-	// Initialise la base de données
+	// Initialise la base de données et initialise le compteur msg_id
 	let db = DbManager::new("hub_relay.db").await.expect("Cannot open the database");
-
-	// Initialise le compteur de message envoyés
 	let _ = init_msg_id(&db, public_addr).await;
 
 	// Importe les données de la base de données vers le programme
-	let relays_list: PeersMap = db.get_peers_from_db().await.expect("[ERROR] Initialisation of database failed");
+	let relays: PeersMap = db.get_peers_from_db().await.expect("[ERROR] Initialisation of database failed");
 	let logs: MessagesMap = db.get_logs_from_db().await.expect("[ERROR] Initialisation of database failed");
 
     // Suppression automatique des noeuds inactifs
     tokio::spawn({
-	    let relays_list = Arc::clone(&relays_list);
+	    let relays = Arc::clone(&relays);
 	    async move {
 	        loop {
-	            delete_disconnected_peers(&relays_list).await;
+	            delete_disconnected_peers(&relays).await;
 	            sleep(Duration::from_secs(10)).await;
 	        }
 	    }
@@ -40,17 +38,17 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 
     // Actualisation de la base de données
 	tokio::spawn({
-	    let relays_list = Arc::clone(&relays_list);
+	    let relays = Arc::clone(&relays);
 	    let logs = Arc::clone(&logs);
 	    let db = db.clone();
 	    async move {
 	        loop {
 	            sleep(Duration::from_secs(5)).await;
 
-	            if let Err(e) = db.refresh_peers(Arc::clone(&relays_list)).await {
+	            if let Err(e) = db.refresh_peers(&relays).await {
 				    eprintln!("[ERROR] refresh_peers failed: {}", e);
 				}
-	            if let Err(e) = db.refresh_logs(Arc::clone(&logs)).await {
+	            if let Err(e) = db.refresh_logs(&logs).await {
 				    eprintln!("[ERROR] refresh_logs failed: {}", e);
 				}
 	        }
@@ -64,7 +62,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 		match &msg_rcv.payload {
 			// Un relai se déclare : on l'ajoute/met à jour dans la map
 			Payload::BeNewRelay => {
-				relays_list.lock().await
+				relays.lock().await
 					.entry(msg_rcv.headers.src_addr)
 					.and_modify(|peer_info| peer_info.last_seen = msg_rcv.headers.time)
 					.or_insert(PeerInfo {
@@ -94,7 +92,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 			// Un peer cherche un relai : on lui en renvoie un
 			Payload::NeedRelay => {
 				let relay_info = {
-					let relays = relays_list.lock().await;
+					let relays = relays.lock().await;
 					relays.iter()
 						.find(|(addr, _)| **addr != msg_rcv.headers.src_addr)
 						.map(|(addr, peer_info)| (*addr, peer_info.id.clone()))

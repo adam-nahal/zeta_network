@@ -1,16 +1,14 @@
 use tokio::net::UdpSocket;
 use tokio::time::{sleep, Duration};
 use std::net::SocketAddr;
-
-use tokio::sync::Mutex;
 use std::sync::Arc;
 use tokio::io::{stdin, AsyncBufReadExt, BufReader};
 use std::io::Write;
-use std::collections::HashMap;
 
 use crate::nat_detector::nat_detector;
 use crate::nat_detector::util::NatType::*;
 use crate::lib_p2p::*;
+use crate::db::*;
 
 pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {
     // Initialisation du noeud
@@ -44,8 +42,14 @@ pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {
 
 pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id: String, hub_relay_addr: SocketAddr) {
 	let socket = Arc::new(socket);
-    // Crée la liste de tous les clients qui ont contacté ce relai
-    let peers_list: PeersMap = Arc::new(Mutex::new(HashMap::new()));
+
+	// Initialise la base de données et initialise le compteur msg_id
+	let db = DbManager::new("peer.db").await.expect("Cannot open the database");
+	let _ = init_msg_id(&db, public_addr).await;
+
+	// Importe les données de la base de données vers le programme
+	let peers: PeersMap = db.get_peers_from_db().await.expect("[ERROR] Initialisation of database failed");
+	let logs: MessagesMap = db.get_logs_from_db().await.expect("[ERROR] Initialisation of database failed");
 
 	// Crée le dispatcher
 	let (dispatcher, inbox) = create_node_channels();
@@ -53,109 +57,127 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	tokio::spawn(dispatcher.run(Arc::clone(&socket)));
 
     // Suppression automatique des noeuds inactifs
-    let peers_cleanup = Arc::clone(&peers_list);
-    tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_secs(10)).await;
-            delete_disconnected_peers(&peers_cleanup).await;
-        }
-    });
-
-	// Boucle de réception
-    let recv_socket = Arc::clone(&socket);
-    let recv_peers_list = Arc::clone(&peers_list);
-    let recv_peer_id = peer_id.clone();
-    tokio::spawn(async move {
-    	while let Some((msg_rcv, _)) = general_rx.recv().await {
-
-	        // Ajout des nouveaux noeuds ou mise à jour de la dernière connection
-	        let connected_peers_clone = Arc::clone(&recv_peers_list);
-	        if let Payload::Register = &msg_rcv.payload {
-	            connected_peers_clone.lock().await
-	                .entry(msg_rcv.headers.src_addr)  // La clé existe-t-elle déjà ?
-	                .and_modify(|t| t.last_seen = msg_rcv.headers.time)
-	                .or_insert(PeerInfo {
-					    addr: msg_rcv.headers.src_addr,
-					    id: msg_rcv.headers.src_id.clone(),
-					    last_seen: msg_rcv.headers.time,
-					    is_relay: false,
-					});
-
-	            let msg = Message {
-		            headers: Headers {
-		                msg_id:   new_msg_id(),
-		                src_addr: public_addr,
-		                src_id:   recv_peer_id.clone(),
-		                dst_addr: msg_rcv.headers.src_addr,
-		                dst_id:   msg_rcv.headers.src_id.clone(),
-		                time:     now_secs(),
-		            },
-		            payload: Payload::Ack { reply_to: msg_rcv.headers.msg_id },
-					last_hop: public_addr,
-		        };
-		        let _ = recv_socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
-	        }
-
-	        // Relaie le message si c'est un message à relayer
-	        if let Payload::Classic { txt: _ } = &msg_rcv.payload {
-	            if public_addr != msg_rcv.headers.dst_addr {
-	                relay_message(&connected_peers_clone, msg_rcv.headers.src_addr, msg_rcv.clone(), &recv_socket).await;
-	            }
-	        }
-
-	        // Fait le pont entre deux noeuds
-	        if let Payload::Connect = &msg_rcv.payload {
-	            let map = connected_peers_clone.lock().await;  // lock d'abord
-	            if map.contains_key(&msg_rcv.headers.dst_addr) {
-	                drop(map);  // libère le lock avant le send
-	                let _ = recv_socket.send_msg(&msg_rcv, msg_rcv.headers.dst_addr).await;
-	                println!("Sent to {}: '{}'", msg_rcv.headers.dst_addr, msg_rcv);
-	            } else {
-	                eprintln!("Peer {} ({}) is unknown", msg_rcv.headers.dst_addr, msg_rcv.headers.dst_id);
-	            }
-	        }
-
-	        // Ce relais a un nouveau client qui veut se connecter -> hole punching
-	        if let Payload::RelayHasNewClient { peer_addr, peer_id: client_id, .. } = &msg_rcv.payload {
-	            let msg = Message {
-	            	headers: Headers {
-            			msg_id: new_msg_id(),
-		                src_addr: public_addr,
-		                src_id: recv_peer_id.clone(),
-		                dst_addr: *peer_addr,
-		                dst_id: client_id.to_string(),
-		                time: now_secs(),
-	            	},
-	            	payload: Payload::PunchTheHole,
-					last_hop: public_addr,
-	            };
-	            let _ = recv_socket.send_msg(&msg, *peer_addr).await;
-	            
-	        }
-
-	        // Répond aux demandes d'informations
-	        if let Payload::AskForAddr { peer_id } = &msg_rcv.payload {
-	            let map = connected_peers_clone.lock().await;  // lock d'abord
-	            if let Some((_, peer_info)) = map.iter().find(|(_, peer_info)| peer_info.id == *peer_id) {
-	                let msg = Message {
-	                	headers: Headers {
-            				msg_id: new_msg_id(),
-			                src_addr: public_addr,
-			                src_id: recv_peer_id.clone(),
-			                dst_addr: peer_info.addr,
-			                dst_id: msg_rcv.headers.src_id.clone(),
-			                time: now_secs(),
-	                	},
-	                	payload: Payload::PeerInfo { peer_addr: peer_info.addr, peer_id: peer_id.clone() },
-						last_hop: public_addr,
-	                };
-	                drop(map);  // libère le lock avant le send
-	                let _ = recv_socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
-	            } else {
-	                eprintln!("Peer {} not found", recv_peer_id);
-	            }
+    tokio::spawn({
+    	let peers = Arc::clone(&peers);
+    	async move {
+	        loop {
+	            sleep(Duration::from_secs(10)).await;
+	            delete_disconnected_peers(&peers).await;
 	        }
 	    }
+    });
+
+    // Actualisation de la base de données
+	tokio::spawn({
+	    let peers = Arc::clone(&peers);
+	    let logs = Arc::clone(&logs);
+	    let db = db.clone();
+	    async move {
+	        loop {
+	            sleep(Duration::from_secs(5)).await;
+	            let _ = db.refresh_peers(&peers).await.expect("[ERROR] refresh_peers failed");
+	            let _ = db.refresh_logs(&logs).await.expect("[ERROR] refresh_logs failed");
+	        }
+	    }
+	});
+
+	// Boucle de réception
+    tokio::spawn({
+	    let socket = Arc::clone(&socket);
+	    let peers = Arc::clone(&peers);
+	    let peer_id = peer_id.clone();
+	    async move {
+	    	while let Some((msg_rcv, _)) = general_rx.recv().await {
+
+		        // Ajout des nouveaux noeuds ou mise à jour de la dernière connection
+		        let connected_peers_clone = Arc::clone(&peers);
+		        if let Payload::Register = &msg_rcv.payload {
+		            connected_peers_clone.lock().await
+		                .entry(msg_rcv.headers.src_addr)  // La clé existe-t-elle déjà ?
+		                .and_modify(|t| t.last_seen = msg_rcv.headers.time)
+		                .or_insert(PeerInfo {
+						    addr: msg_rcv.headers.src_addr,
+						    id: msg_rcv.headers.src_id.clone(),
+						    last_seen: msg_rcv.headers.time,
+						    is_relay: false,
+						});
+
+		            let msg = Message {
+			            headers: Headers {
+			                msg_id:   new_msg_id(),
+			                src_addr: public_addr,
+			                src_id:   peer_id.clone(),
+			                dst_addr: msg_rcv.headers.src_addr,
+			                dst_id:   msg_rcv.headers.src_id.clone(),
+			                time:     now_secs(),
+			            },
+			            payload: Payload::Ack { reply_to: msg_rcv.headers.msg_id },
+						last_hop: public_addr,
+			        };
+			        let _ = socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
+		        }
+
+		        // Relaie le message si c'est un message à relayer
+		        if let Payload::Classic { txt: _ } = &msg_rcv.payload {
+		            if public_addr != msg_rcv.headers.dst_addr {
+		                relay_message(&connected_peers_clone, msg_rcv.headers.src_addr, msg_rcv.clone(), &socket).await;
+		            }
+		        }
+
+		        // Fait le pont entre deux noeuds
+		        if let Payload::Connect = &msg_rcv.payload {
+		            let map = connected_peers_clone.lock().await;  // lock d'abord
+		            if map.contains_key(&msg_rcv.headers.dst_addr) {
+		                drop(map);  // libère le lock avant le send
+		                let _ = socket.send_msg(&msg_rcv, msg_rcv.headers.dst_addr).await;
+		                println!("Sent to {}: '{}'", msg_rcv.headers.dst_addr, msg_rcv);
+		            } else {
+		                eprintln!("Peer {} ({}) is unknown", msg_rcv.headers.dst_addr, msg_rcv.headers.dst_id);
+		            }
+		        }
+
+		        // Ce relais a un nouveau client qui veut se connecter -> hole punching
+		        if let Payload::RelayHasNewClient { peer_addr, peer_id: client_id, .. } = &msg_rcv.payload {
+		            let msg = Message {
+		            	headers: Headers {
+	            			msg_id: new_msg_id(),
+			                src_addr: public_addr,
+			                src_id: peer_id.clone(),
+			                dst_addr: *peer_addr,
+			                dst_id: client_id.to_string(),
+			                time: now_secs(),
+		            	},
+		            	payload: Payload::PunchTheHole,
+						last_hop: public_addr,
+		            };
+		            let _ = socket.send_msg(&msg, *peer_addr).await;
+		            
+		        }
+
+		        // Répond aux demandes d'informations
+		        if let Payload::AskForAddr { peer_id: peer_id_rcv } = &msg_rcv.payload {
+		            let map = connected_peers_clone.lock().await;  // lock d'abord
+		            if let Some((_, peer_info)) = map.iter().find(|(_, peer_info)| peer_info.id == *peer_id_rcv) {
+		                let msg = Message {
+		                	headers: Headers {
+	            				msg_id: new_msg_id(),
+				                src_addr: public_addr,
+				                src_id: peer_id.clone(),
+				                dst_addr: peer_info.addr,
+				                dst_id: msg_rcv.headers.src_id.clone(),
+				                time: now_secs(),
+		                	},
+		                	payload: Payload::PeerInfo { peer_addr: peer_info.addr, peer_id: peer_id_rcv.clone() },
+							last_hop: public_addr,
+		                };
+		                drop(map);  // libère le lock avant le send
+		                let _ = socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
+		            } else {
+		                eprintln!("Peer {} not found", peer_id_rcv);
+		            }
+		        }
+		    }
+		}
     });
 
     // S'enregistre auprès du hubrelay en tant que relay
@@ -181,46 +203,48 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	).await else {return};
 
     // Boucle d'envoi
-    let send_socket = Arc::clone(&socket);
-	tokio::spawn(async move {
-	    let mut reader = BufReader::new(stdin());
-	    let mut line = String::new();
-	    loop {
-	        // Affichage du prompt (bloquant mais sans conséquence pour un CLI)
-	        print!("> ");
-	        std::io::stdout().flush().unwrap();
+	tokio::spawn({
+    	let socket = Arc::clone(&socket);
+    	async move {
+		    let mut reader = BufReader::new(stdin());
+		    let mut line = String::new();
+		    loop {
+		        // Affichage du prompt (bloquant mais sans conséquence pour un CLI)
+		        print!("> ");
+		        std::io::stdout().flush().unwrap();
 
-	        line.clear();
-	        match reader.read_line(&mut line).await {
-	            Ok(0) => break, // EOF (Ctrl+D)
-	            Ok(_) => {
-	                let msg_text = line.trim();
-	                if msg_text == "/q" {
-	                    break;
-	                }
-	                if msg_text.is_empty() {
-	                    continue;
-	                }
-	                let msg = Message {
-	                	headers: Headers {
-            				msg_id: new_msg_id(),
-		                    src_addr: public_addr,
-		                    src_id: peer_id.clone(),
-		                    dst_addr: "0.0.0.0:0".parse().unwrap(),
-		                    dst_id: "all".to_string(),
-		                    time: now_secs(),
-	                	},
-	                	payload: Payload::Classic { txt: msg_text.to_string() },
-	                	last_hop: public_addr,
-	                };
-	                let _ = send_socket.send_msg(&msg, relay_addr).await;
-	            }
-	            Err(e) => {
-	                eprintln!("Erreur de lecture : {}", e);
-	                break;
-	            }
-	        }
-	    }
+		        line.clear();
+		        match reader.read_line(&mut line).await {
+		            Ok(0) => break, // EOF (Ctrl+D)
+		            Ok(_) => {
+		                let msg_text = line.trim();
+		                if msg_text == "/q" {
+		                    break;
+		                }
+		                if msg_text.is_empty() {
+		                    continue;
+		                }
+		                let msg = Message {
+		                	headers: Headers {
+	            				msg_id: new_msg_id(),
+			                    src_addr: public_addr,
+			                    src_id: peer_id.clone(),
+			                    dst_addr: "0.0.0.0:0".parse().unwrap(),
+			                    dst_id: "all".to_string(),
+			                    time: now_secs(),
+		                	},
+		                	payload: Payload::Classic { txt: msg_text.to_string() },
+		                	last_hop: public_addr,
+		                };
+		                let _ = socket.send_msg(&msg, relay_addr).await;
+		            }
+		            Err(e) => {
+		                eprintln!("Erreur de lecture : {}", e);
+		                break;
+		            }
+		        }
+		    }
+		}
 	});
 
 	// Pour éviter que le programme quit (tout est parallèle jusqu'ici...)

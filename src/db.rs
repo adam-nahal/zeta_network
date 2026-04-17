@@ -118,7 +118,7 @@ impl DbManager {
 	    Ok(logs)
 	}
 
-	pub async fn refresh_peers(&self, peer_map: PeersMap) -> Result<()> {
+	pub async fn refresh_peers(&self, peer_map: &PeersMap) -> Result<()> {
 	    let peers_guard = peer_map.lock().await;
 	    let mut conn = self.conn.lock().await;
 	    let tx = conn.transaction()?;  // Permet l'atomicité du refresh (soit tout est maj, soit rien)
@@ -151,7 +151,7 @@ impl DbManager {
 	    Ok(())
 	}
 
-    pub async fn refresh_logs(&self, logs: MessagesMap) -> Result<()> {
+    pub async fn refresh_logs(&self, logs: &MessagesMap) -> Result<()> {
 	    let logs2 = logs.lock().await;
         let mut conn = self.conn.lock().await;
 	    let tx = conn.transaction()?;
