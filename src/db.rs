@@ -192,9 +192,11 @@ impl DbManager {
     }
 
     pub async fn get_max_msg_id(&self, public_addr: SocketAddr) -> Result<u64> {
-        let conn = self.conn.lock().await;
-        let mut stmt = conn.prepare("SELECT COALESCE(MAX(msg_id), 0) FROM logs")?;
-        let max_id = stmt.query_row([], |row| row.get(0))?;
-        Ok(max_id)
+	    let conn = self.conn.lock().await;
+	    let mut stmt = conn.prepare(
+	        "SELECT COALESCE(MAX(msg_id), 0) FROM logs WHERE src_addr = ?1"
+	    )?;
+	    let max_id = stmt.query_row(params![public_addr.to_string()], |row| row.get(0))?;
+	    Ok(max_id)
     }
 }
