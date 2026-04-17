@@ -27,7 +27,7 @@ impl DbManager {
         )?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS logs (
-                msg_id INTEGER PRIMARY KEY,
+                msg_id INTEGER NOT NULL,
                 time INTEGER NOT NULL,
                 src_addr TEXT NOT NULL,
                 src_id TEXT NOT NULL,
