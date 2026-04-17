@@ -279,8 +279,8 @@ pub fn new_msg_id() -> u64 {
     MSG_COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
-pub async fn init_msg_id(db: &DbManager) -> u64 {
-    let max_id = db.get_max_msg_id().await.unwrap_or(0);
+pub async fn init_msg_id(db: &DbManager, public_addr: SocketAddr) -> u64 {
+    let max_id = db.get_max_msg_id(public_addr).await.unwrap_or(0);
     let init_val = if max_id == 0 { 1 } else { max_id + 1 };
     println!("max_id:{}, init_val:{}", max_id, init_val);
     MSG_COUNTER.store(init_val, Ordering::Relaxed);

@@ -21,7 +21,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 	let db = DbManager::new("hub_relay.db").await.expect("Cannot open the database");
 
 	// Initialise le compteur de message envoyés
-	let _ = init_msg_id(&db);
+	let _ = init_msg_id(&db, public_addr).await;
 
 	// Importe les données de la base de données vers le programme
 	let relays_list: PeersMap = db.get_peers_from_db().await.expect("[ERROR] Initialisation of database failed");
