@@ -128,26 +128,27 @@ impl fmt::Display for Headers {
 
 #[async_trait::async_trait]
 pub trait UdpSocketExt {
-    async fn send_msg(&self, msg: &Message, next_hop: SocketAddr) -> Result<usize>;
-    async fn send_and_wait_ack(&self, msg: &Message, dest: SocketAddr, ack_waiter: &AckWaiter) -> bool;
+    async fn send_msg(&self, msg: Message, next_hop: SocketAddr, logs: &MessagesMap) -> Result<usize>;
+    async fn send_and_wait_ack(&self, msg: Message, dest: SocketAddr, ack_waiter: &AckWaiter, logs: &MessagesMap) -> bool;
 }
 
 #[async_trait::async_trait]
 impl UdpSocketExt for UdpSocket {
-    async fn send_msg(&self, msg: &Message, next_hop: SocketAddr) -> Result<usize> {
+    async fn send_msg(&self, msg: Message, next_hop: SocketAddr, logs: &MessagesMap) -> Result<usize> {
         let encoded = bincode::serialize(&msg)?;
         let size = self.send_to(&encoded, next_hop).await?;
 		println!("->{}", msg);
+		logs.lock().await.push(msg);
 		Ok(size)
     }
 
     // Enregistre l'attente, envoie le message, attend le signal
-	async fn send_and_wait_ack(&self, msg: &Message, dest: SocketAddr, ack_waiter: &AckWaiter) -> bool {
+	async fn send_and_wait_ack(&self, msg: Message, dest: SocketAddr, ack_waiter: &AckWaiter, logs: &MessagesMap) -> bool {
 	    let rx = ack_waiter.register(msg.headers.msg_id).await;   // register AVANT send
-	    let _ = self.send_msg(msg, dest).await;
+	    let _ = self.send_msg(msg, dest, logs).await;
 	    match timeout(Duration::from_secs(10), rx).await {
 	        Ok(Ok(())) => true,
-	        _ => { eprintln!("[ERROR] Timeout waiting for ack"); false }
+	        _ => { eprintln!("[TIMEOUT] No acks reveiced"); false }
 	    }
 	}
 }
@@ -205,12 +206,13 @@ pub async fn delete_disconnected_peers(peers: &PeersMap) {
     });
 }
 
-pub async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, msg: Message, socket: &UdpSocket) {
+pub async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, mut msg: Message, socket: &UdpSocket, logs: &MessagesMap) {
     let peers_map = peers.lock().await;
 
     for (other_addr, _) in peers_map.iter() {
         if other_addr != &sender_addr {
-            if let Err(e) = socket.send_msg(&msg, *other_addr).await {
+        	msg.last_hop = *other_addr;
+            if let Err(e) = socket.send_msg(msg.clone(), *other_addr, logs).await {
                 eprintln!("Failed to send to {}: {}", other_addr, e);
             } else {
                 println!("    Relayed to {}", other_addr);
@@ -219,7 +221,7 @@ pub async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, msg: Messa
     }
 }
 
-pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, peer_id: &str, hub_relay_addr: SocketAddr, hub_rx: &mut MsgReceiver, ack_waiter: &AckWaiter) -> Option<(SocketAddr, String)> {
+pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, peer_id: &str, hub_relay_addr: SocketAddr, hub_rx: &mut MsgReceiver, ack_waiter: &AckWaiter, logs: &MessagesMap) -> Option<(SocketAddr, String)> {
     let (relay_addr, relay_id) = loop {
         println!("\nAsking the hub relay an available relay...");
         let msg = Message {
@@ -234,7 +236,7 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
             payload: Payload::NeedRelay,
             last_hop: public_addr,
         };
-        let _ = socket.send_msg(&msg, hub_relay_addr).await;
+        let _ = socket.send_msg(msg, hub_relay_addr, &logs).await;
 
         match hub_rx.recv().await {
         	Some((msg, _)) => match &msg.payload {
@@ -265,7 +267,7 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
         payload: Payload::Register,
         last_hop: public_addr,
     };
-    if !socket.send_and_wait_ack(&msg, relay_addr, ack_waiter).await {
+    if !socket.send_and_wait_ack(msg, relay_addr, ack_waiter, &logs).await {
         println!("[ERROR] No ack from relay, aborting");
         return None;
     }
@@ -339,9 +341,10 @@ pub fn create_node_channels() -> (NodeDispatcher, NodeInbox) {
 }
 
 impl NodeDispatcher {
-    pub async fn run(self, socket: Arc<UdpSocket>) {
+    pub async fn run(self, socket: Arc<UdpSocket>, logs: MessagesMap) {
         loop {
             let Some((msg, addr)) = recv_msg(&socket).await else { continue };
+            logs.lock().await.push(msg.clone());
             match &msg.payload {
                 Payload::Ack { reply_to } => {
                     self.ack_waiter.resolve(*reply_to).await;

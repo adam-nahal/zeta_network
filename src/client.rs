@@ -44,7 +44,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	let socket = Arc::new(socket);
 
 	// Initialise la base de données et initialise le compteur msg_id
-	let db = DbManager::new("peer.db").await.expect("Cannot open the database");
+	let db = DbManager::new("client.db").await.expect("Cannot open the database");
 	let _ = init_msg_id(&db, public_addr).await;
 
 	// Importe les données de la base de données vers le programme
@@ -54,7 +54,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	// Crée le dispatcher
 	let (dispatcher, inbox) = create_node_channels();
 	let NodeInbox { ack_waiter, mut hub_rx, mut general_rx } = inbox;
-	tokio::spawn(dispatcher.run(Arc::clone(&socket)));
+	tokio::spawn(dispatcher.run(Arc::clone(&socket), Arc::clone(&logs)));
 
     // Suppression automatique des noeuds inactifs
     tokio::spawn({
@@ -85,9 +85,11 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
     tokio::spawn({
 	    let socket = Arc::clone(&socket);
 	    let peers = Arc::clone(&peers);
+	    let logs = Arc::clone(&logs);
 	    let peer_id = peer_id.clone();
 	    async move {
 	    	while let Some((msg_rcv, _)) = general_rx.recv().await {
+	    		logs.lock().await.push(msg_rcv.clone());
 
 		        // Ajout des nouveaux noeuds ou mise à jour de la dernière connection
 		        let connected_peers_clone = Arc::clone(&peers);
@@ -114,13 +116,13 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 			            payload: Payload::Ack { reply_to: msg_rcv.headers.msg_id },
 						last_hop: public_addr,
 			        };
-			        let _ = socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
+			        let _ = socket.send_msg(msg, msg_rcv.headers.src_addr, &logs).await;
 		        }
 
 		        // Relaie le message si c'est un message à relayer
 		        if let Payload::Classic { txt: _ } = &msg_rcv.payload {
 		            if public_addr != msg_rcv.headers.dst_addr {
-		                relay_message(&connected_peers_clone, msg_rcv.headers.src_addr, msg_rcv.clone(), &socket).await;
+		                relay_message(&connected_peers_clone, msg_rcv.headers.src_addr, msg_rcv.clone(), &socket, &logs).await;
 		            }
 		        }
 
@@ -129,7 +131,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		            let map = connected_peers_clone.lock().await;  // lock d'abord
 		            if map.contains_key(&msg_rcv.headers.dst_addr) {
 		                drop(map);  // libère le lock avant le send
-		                let _ = socket.send_msg(&msg_rcv, msg_rcv.headers.dst_addr).await;
+		                let _ = socket.send_msg(msg_rcv.clone(), msg_rcv.headers.dst_addr, &logs).await;
 		                println!("Sent to {}: '{}'", msg_rcv.headers.dst_addr, msg_rcv);
 		            } else {
 		                eprintln!("Peer {} ({}) is unknown", msg_rcv.headers.dst_addr, msg_rcv.headers.dst_id);
@@ -150,7 +152,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		            	payload: Payload::PunchTheHole,
 						last_hop: public_addr,
 		            };
-		            let _ = socket.send_msg(&msg, *peer_addr).await;
+		            let _ = socket.send_msg(msg, *peer_addr, &logs).await;
 		            
 		        }
 
@@ -171,7 +173,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 							last_hop: public_addr,
 		                };
 		                drop(map);  // libère le lock avant le send
-		                let _ = socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
+		                let _ = socket.send_msg(msg, msg_rcv.headers.src_addr, &logs).await;
 		            } else {
 		                eprintln!("Peer {} not found", peer_id_rcv);
 		            }
@@ -194,12 +196,12 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	    payload: Payload::BeNewRelay,
 		last_hop: public_addr,
     };
-    while !socket.send_and_wait_ack(&msg, hub_relay_addr, &ack_waiter).await {}
+    while !socket.send_and_wait_ack(msg.clone(), hub_relay_addr, &ack_waiter, &logs).await {}
 
 	// Demande au hub relais l'adresse d'un relais
-	let Some((relay_addr, _relay_id)) = connect_to_a_relay(
+	let Some((relay_addr, _relay_id)) = connect_to_a_relay (
 		&socket, public_addr, &peer_id, hub_relay_addr, 
-		&mut hub_rx, &ack_waiter
+		&mut hub_rx, &ack_waiter, &logs
 	).await else {return};
 
     // Boucle d'envoi
@@ -236,7 +238,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		                	payload: Payload::Classic { txt: msg_text.to_string() },
 		                	last_hop: public_addr,
 		                };
-		                let _ = socket.send_msg(&msg, relay_addr).await;
+		                let _ = socket.send_msg(msg, relay_addr, &logs).await;
 		            }
 		            Err(e) => {
 		                eprintln!("Erreur de lecture : {}", e);

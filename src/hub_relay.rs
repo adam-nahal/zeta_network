@@ -85,8 +85,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 					payload: Payload::Ack { reply_to: msg_rcv.headers.msg_id },
 					last_hop: public_addr,
 				};	
-				let _ = socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
-				logs.lock().await.push(msg);
+				let _ = socket.send_msg(msg, msg_rcv.headers.src_addr, &logs).await;
 			}
 
 			// Un peer cherche un relai : on lui en renvoie un
@@ -110,8 +109,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 						payload: Payload::PeerInfo { peer_addr: relay_addr, peer_id: relay_id.clone() },
 						last_hop: public_addr,
 					};
-					let _ = socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
-					logs.lock().await.push(msg);
+					let _ = socket.send_msg(msg, msg_rcv.headers.src_addr, &logs).await;
 
 					// Avertissons le relais concerné
 					let msg = Message {
@@ -126,8 +124,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 						payload: Payload::RelayHasNewClient { peer_addr: msg_rcv.headers.src_addr, peer_id: msg_rcv.headers.src_id.clone()},
 						last_hop: public_addr,
 					};
-					let _ = socket.send_msg(&msg, relay_addr).await;
-					logs.lock().await.push(msg);
+					let _ = socket.send_msg(msg, relay_addr, &logs).await;
 				} else {
 					let msg = Message {
 						headers: Headers {
@@ -141,8 +138,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 						payload: Payload::NoRelayAvailable,
 						last_hop: public_addr,
 					};
-					let _ = socket.send_msg(&msg, msg_rcv.headers.src_addr).await;
-					logs.lock().await.push(msg);
+					let _ = socket.send_msg(msg, msg_rcv.headers.src_addr, &logs).await;
 				}
 			}
 			_ => println!("Unexpected message: '{}'", msg_rcv)
