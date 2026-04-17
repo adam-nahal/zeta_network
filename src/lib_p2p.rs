@@ -282,6 +282,7 @@ pub fn new_msg_id() -> u64 {
 pub async fn init_msg_id(db: &DbManager) -> u64 {
     let max_id = db.get_max_msg_id().await.unwrap_or(0);
     let init_val = if max_id == 0 { 1 } else { max_id + 1 };
+    println!("max_id:{}, init_val:{}", max_id, init_val);
     MSG_COUNTER.store(init_val, Ordering::Relaxed);
     init_val
 }
