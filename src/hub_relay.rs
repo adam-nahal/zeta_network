@@ -24,8 +24,8 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 	let _ = init_msg_id(&db);
 
 	// Importe les données de la base de données vers le programme
-	let relays_list: PeersMap = db.get_peers_from_db().await.unwrap_or_default();
-	let logs: MessagesMap = db.get_logs_from_db().await.unwrap_or_default();
+	let relays_list: PeersMap = db.get_peers_from_db().await.expect("[ERROR] Initialisation of database failed");
+	let logs: MessagesMap = db.get_logs_from_db().await.expect("[ERROR] Initialisation of database failed");
 
     // Suppression automatique des noeuds inactifs
     tokio::spawn({

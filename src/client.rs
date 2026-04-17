@@ -160,10 +160,9 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 
     // S'enregistre auprès du hubrelay en tant que relay
     println!("\nAsking the hub relay to be a relay...");
-	let msg_id = new_msg_id();
     let msg = Message {
     	headers: Headers {
-            msg_id: msg_id,
+            msg_id: new_msg_id(),
 	        src_addr: public_addr,
 	        src_id: peer_id.clone(),
 	        dst_addr: hub_relay_addr,
@@ -173,15 +172,13 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	    payload: Payload::BeNewRelay,
 		last_hop: public_addr,
     };
-    if !send_and_wait_ack(&socket, &msg, hub_relay_addr, &ack_waiter, msg_id).await {
-	    return;
-	}
+    while !socket.send_and_wait_ack(&msg, hub_relay_addr, &ack_waiter).await {}
 
 	// Demande au hub relais l'adresse d'un relais
 	let Some((relay_addr, _relay_id)) = connect_to_a_relay(
 		&socket, public_addr, &peer_id, hub_relay_addr, 
 		&mut hub_rx, &ack_waiter
-		).await else {return};
+	).await else {return};
 
     // Boucle d'envoi
     let send_socket = Arc::clone(&socket);

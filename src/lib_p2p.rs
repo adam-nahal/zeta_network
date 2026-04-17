@@ -129,6 +129,7 @@ impl fmt::Display for Headers {
 #[async_trait::async_trait]
 pub trait UdpSocketExt {
     async fn send_msg(&self, msg: &Message, next_hop: SocketAddr) -> Result<usize>;
+    async fn send_and_wait_ack(&self, msg: &Message, dest: SocketAddr, ack_waiter: &AckWaiter) -> bool;
 }
 
 #[async_trait::async_trait]
@@ -139,6 +140,16 @@ impl UdpSocketExt for UdpSocket {
 		println!("->{}", msg);
 		Ok(size)
     }
+
+    // Enregistre l'attente, envoie le message, attend le signal
+	async fn send_and_wait_ack(&self, msg: &Message, dest: SocketAddr, ack_waiter: &AckWaiter) -> bool {
+	    let rx = ack_waiter.register(msg.headers.msg_id).await;   // register AVANT send
+	    let _ = self.send_msg(msg, dest).await;
+	    match timeout(Duration::from_secs(10), rx).await {
+	        Ok(Ok(())) => true,
+	        _ => { eprintln!("[ERROR] Timeout waiting for ack"); false }
+	    }
+	}
 }
 
 pub async fn get_public_ip(socket: &UdpSocket) -> Result<SocketAddr> {
@@ -208,16 +219,6 @@ pub async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, msg: Messa
     }
 }
 
-// Enregistre l'attente, envoie le message, attend le signal
-pub async fn send_and_wait_ack(socket: &UdpSocket, msg: &Message, dest: SocketAddr, ack_waiter: &AckWaiter, msg_id: u64) -> bool {
-    let rx = ack_waiter.register(msg_id).await;   // register AVANT send
-    let _ = socket.send_msg(msg, dest).await;
-    match timeout(Duration::from_secs(30), rx).await {
-        Ok(Ok(())) => true,
-        _ => { eprintln!("[ERROR] Timeout waiting for ack"); false }
-    }
-}
-
 pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, peer_id: &str, hub_relay_addr: SocketAddr, hub_rx: &mut MsgReceiver, ack_waiter: &AckWaiter) -> Option<(SocketAddr, String)> {
     let (relay_addr, relay_id) = loop {
         println!("\nAsking the hub relay an available relay...");
@@ -252,10 +253,9 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
         }
     };
 
-    let msg_id = new_msg_id();
     let msg = Message {
         headers: Headers {
-            msg_id,
+            msg_id: new_msg_id(),
             src_addr: public_addr,
             src_id:   peer_id.to_string(),
             dst_addr: relay_addr,
@@ -265,7 +265,7 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
         payload: Payload::Register,
         last_hop: public_addr,
     };
-    if !send_and_wait_ack(&socket, &msg, relay_addr, ack_waiter, msg_id).await {
+    if !socket.send_and_wait_ack(&msg, relay_addr, ack_waiter).await {
         println!("[ERROR] No ack from relay, aborting");
         return None;
     }
