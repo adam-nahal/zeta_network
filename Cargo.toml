@@ -18,3 +18,5 @@ bincode = "1"
 stunclient = { version = "0.4.2", default-features = false, features = ["async"] }
 rusqlite = { version = "0.30", features = ["bundled"] }
 tokio-rusqlite = "0.5"
+ed25519-dalek = { version = "2.2.0", features = ["rand_core", "serde"] }
+hex = "0.4.3"

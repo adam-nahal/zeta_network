@@ -43,6 +43,9 @@ pub async fn main_client(peer_id: String, hub_relay_addr: SocketAddr) {
 pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id: String, hub_relay_addr: SocketAddr) {
 	let socket = Arc::new(socket);
 
+	// Création des clés d'authentification
+	let key_pair: AuthKeys = AuthKeys::generate();
+
 	// Initialise la base de données et initialise le compteur msg_id
 	let db = DbManager::new("client.db").await.expect("Cannot open the database");
 	let _ = init_msg_id(&db, public_addr).await;
@@ -75,8 +78,8 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	    async move {
 	        loop {
 	            sleep(Duration::from_secs(5)).await;
-	            let _ = db.refresh_peers(&peers).await.expect("[ERROR] refresh_peers failed");
-	            let _ = db.refresh_logs(&logs).await.expect("[ERROR] refresh_logs failed");
+	            let _ = db.refresh_peers_in_db(&peers).await.expect("[ERROR] refresh_peers_in_db failed");
+	            let _ = db.refresh_logs_in_db(&logs).await.expect("[ERROR] refresh_logs_in_db failed");
 	        }
 	    }
 	});
@@ -87,13 +90,12 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	    let peers = Arc::clone(&peers);
 	    let logs = Arc::clone(&logs);
 	    let peer_id = peer_id.clone();
+	    let key_pair = key_pair.clone();
 	    async move {
 	    	while let Some((msg_rcv, _)) = general_rx.recv().await {
-	    		logs.lock().await.push(msg_rcv.clone());
-
 		        // Ajout des nouveaux noeuds ou mise à jour de la dernière connection
 		        let connected_peers_clone = Arc::clone(&peers);
-		        if let Payload::Register = &msg_rcv.payload {
+		        if let Payload::Register { verifying_key } = &msg_rcv.payload {
 		            connected_peers_clone.lock().await
 		                .entry(msg_rcv.headers.src_addr)  // La clé existe-t-elle déjà ?
 		                .and_modify(|t| t.last_seen = msg_rcv.headers.time)
@@ -102,9 +104,10 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 						    id: msg_rcv.headers.src_id.clone(),
 						    last_seen: msg_rcv.headers.time,
 						    is_relay: false,
+						    verifying_key: *verifying_key
 						});
 
-		            let msg = Message {
+		            let mut msg = Message {
 			            headers: Headers {
 			                msg_id:   new_msg_id(),
 			                src_addr: public_addr,
@@ -112,15 +115,17 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 			                dst_addr: msg_rcv.headers.src_addr,
 			                dst_id:   msg_rcv.headers.src_id.clone(),
 			                time:     now_secs(),
+							signature: vec![], 
 			            },
 			            payload: Payload::Ack { reply_to: msg_rcv.headers.msg_id },
 						last_hop: public_addr,
 			        };
+					let _ = msg.sign(&key_pair.signing_key);
 			        let _ = socket.send_msg(msg, msg_rcv.headers.src_addr, &logs).await;
 		        }
 
 		        // Relaie le message si c'est un message à relayer
-		        if let Payload::Classic { txt: _ } = &msg_rcv.payload {
+		        if let Payload::Classic { .. } = &msg_rcv.payload {
 		            if public_addr != msg_rcv.headers.dst_addr {
 		                relay_message(&connected_peers_clone, msg_rcv.headers.src_addr, msg_rcv.clone(), &socket, &logs).await;
 		            }
@@ -140,7 +145,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 
 		        // Ce relais a un nouveau client qui veut se connecter -> hole punching
 		        if let Payload::RelayHasNewClient { peer_addr, peer_id: client_id, .. } = &msg_rcv.payload {
-		            let msg = Message {
+		            let mut msg = Message {
 		            	headers: Headers {
 	            			msg_id: new_msg_id(),
 			                src_addr: public_addr,
@@ -148,10 +153,12 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 			                dst_addr: *peer_addr,
 			                dst_id: client_id.to_string(),
 			                time: now_secs(),
+							signature: vec![], 
 		            	},
 		            	payload: Payload::PunchTheHole,
 						last_hop: public_addr,
 		            };
+					let _ = msg.sign(&key_pair.signing_key);
 		            let _ = socket.send_msg(msg, *peer_addr, &logs).await;
 		            
 		        }
@@ -160,19 +167,21 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		        if let Payload::AskForAddr { peer_id: peer_id_rcv } = &msg_rcv.payload {
 		            let map = connected_peers_clone.lock().await;  // lock d'abord
 		            if let Some((_, peer_info)) = map.iter().find(|(_, peer_info)| peer_info.id == *peer_id_rcv) {
-		                let msg = Message {
+		                let mut msg = Message {
 		                	headers: Headers {
 	            				msg_id: new_msg_id(),
 				                src_addr: public_addr,
 				                src_id: peer_id.clone(),
-				                dst_addr: peer_info.addr,
+				                dst_addr: msg_rcv.headers.src_addr,
 				                dst_id: msg_rcv.headers.src_id.clone(),
 				                time: now_secs(),
+								signature: vec![], 
 		                	},
 		                	payload: Payload::PeerInfo { peer_addr: peer_info.addr, peer_id: peer_id_rcv.clone() },
 							last_hop: public_addr,
 		                };
 		                drop(map);  // libère le lock avant le send
+						let _ = msg.sign(&key_pair.signing_key);
 		                let _ = socket.send_msg(msg, msg_rcv.headers.src_addr, &logs).await;
 		            } else {
 		                eprintln!("Peer {} not found", peer_id_rcv);
@@ -184,7 +193,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 
     // S'enregistre auprès du hubrelay en tant que relay
     println!("\nAsking the hub relay to be a relay...");
-    let msg = Message {
+    let mut msg = Message {
     	headers: Headers {
             msg_id: new_msg_id(),
 	        src_addr: public_addr,
@@ -192,21 +201,28 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	        dst_addr: hub_relay_addr,
 	        dst_id: "hub".to_string(),
 	        time: now_secs(),
+			signature: vec![], 
 	    },
-	    payload: Payload::BeNewRelay,
+	    payload: Payload::BeNewRelay { verifying_key: key_pair.verifying_key },
 		last_hop: public_addr,
     };
-    while !socket.send_and_wait_ack(msg.clone(), hub_relay_addr, &ack_waiter, &logs).await {}
+    let _ = msg.sign(&key_pair.signing_key);
+    while !socket.send_and_wait_ack(msg.clone(), hub_relay_addr, &ack_waiter, &logs).await {
+    	msg.headers.msg_id = new_msg_id();
+    	msg.headers.time = now_secs();
+    	let _ = msg.sign(&key_pair.signing_key);
+    }
 
 	// Demande au hub relais l'adresse d'un relais
 	let Some((relay_addr, _relay_id)) = connect_to_a_relay (
 		&socket, public_addr, &peer_id, hub_relay_addr, 
-		&mut hub_rx, &ack_waiter, &logs
+		&mut hub_rx, &ack_waiter, &logs, &key_pair
 	).await else {return};
 
     // Boucle d'envoi
 	tokio::spawn({
     	let socket = Arc::clone(&socket);
+    	let key_pair = key_pair.clone();
     	async move {
 		    let mut reader = BufReader::new(stdin());
 		    let mut line = String::new();
@@ -226,7 +242,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		                if msg_text.is_empty() {
 		                    continue;
 		                }
-		                let msg = Message {
+		                let mut msg = Message {
 		                	headers: Headers {
 	            				msg_id: new_msg_id(),
 			                    src_addr: public_addr,
@@ -234,10 +250,12 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 			                    dst_addr: "0.0.0.0:0".parse().unwrap(),
 			                    dst_id: "all".to_string(),
 			                    time: now_secs(),
+								signature: vec![], 
 		                	},
 		                	payload: Payload::Classic { txt: msg_text.to_string() },
 		                	last_hop: public_addr,
 		                };
+		                let _ = msg.sign(&key_pair.signing_key);
 		                let _ = socket.send_msg(msg, relay_addr, &logs).await;
 		            }
 		            Err(e) => {

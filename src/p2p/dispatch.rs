@@ -33,7 +33,7 @@ impl AckWaiter {
     pub async fn resolve(&self, reply_to: u64) {
         match self.pending.lock().await.remove(&reply_to) {
             Some(tx) => { let _ = tx.send(()); }
-            None => eprintln!("[WARN] Ack inattendu pour msg_id={}", reply_to),
+            std::prelude::v1::None => eprintln!("[WARN] Ack inattendu pour msg_id={}", reply_to),
         }
     }
 }

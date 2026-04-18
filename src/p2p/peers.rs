@@ -7,6 +7,8 @@ use crate::p2p::network::*;
 use crate::p2p::dispatch::*;
 use crate::p2p::utils::*;
 
+use super::AuthKeys;
+
 
 pub async fn delete_disconnected_peers(peers: &PeersMap) {
     let mut peers_map = peers.lock().await;
@@ -22,7 +24,7 @@ pub async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, mut msg: M
 
     for (other_addr, _) in peers_map.iter() {
         if other_addr != &sender_addr {
-        	msg.last_hop = *other_addr;
+        	msg.last_hop = sender_addr;
             if let Err(e) = socket.send_msg(msg.clone(), *other_addr, logs).await {
                 eprintln!("Failed to send to {}: {}", other_addr, e);
             } else {
@@ -32,21 +34,23 @@ pub async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, mut msg: M
     }
 }
 
-pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, peer_id: &str, hub_relay_addr: SocketAddr, hub_rx: &mut MsgReceiver, ack_waiter: &AckWaiter, logs: &MessagesMap) -> Option<(SocketAddr, String)> {
+pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, peer_id: &str, hub_relay_addr: SocketAddr, hub_rx: &mut MsgReceiver, ack_waiter: &AckWaiter, logs: &MessagesMap, key_pair: &AuthKeys) -> Option<(SocketAddr, String)> {
     let (relay_addr, relay_id) = loop {
         println!("\nAsking the hub relay an available relay...");
-        let msg = Message {
+        let mut msg = Message {
             headers: Headers {
-                msg_id:   new_msg_id(),
+                msg_id: new_msg_id(),
                 src_addr: public_addr,
-                src_id:   peer_id.to_string(),
+                src_id: peer_id.to_string(),
                 dst_addr: hub_relay_addr,
-                dst_id:   "hub".to_string(),
-                time:     now_secs(),
+                dst_id: "hub".to_string(),
+                time: now_secs(),
+                signature: vec![],
             },
             payload: Payload::NeedRelay,
             last_hop: public_addr,
         };
+        let _ = msg.sign(&key_pair.signing_key);
         let _ = socket.send_msg(msg, hub_relay_addr, &logs).await;
 
         match hub_rx.recv().await {
@@ -62,22 +66,24 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
 		        }
 		        _ => { eprintln!("[ERROR] Unexpected message"); return None; }
 		    },
-		    None => { eprintln!("[ERROR] hub channel closed"); return None; }
+		    std::prelude::v1::None => { eprintln!("[ERROR] hub channel closed"); return None; }
         }
     };
 
-    let msg = Message {
+    let mut msg = Message {
         headers: Headers {
             msg_id: new_msg_id(),
             src_addr: public_addr,
-            src_id:   peer_id.to_string(),
+            src_id: peer_id.to_string(),
             dst_addr: relay_addr,
-            dst_id:   relay_id.clone(),
-            time:     now_secs(),
+            dst_id: relay_id.clone(),
+            time: now_secs(),
+            signature: vec![],
         },
-        payload: Payload::Register,
+        payload: Payload::Register { verifying_key: key_pair.verifying_key },
         last_hop: public_addr,
     };
+    let _ = msg.sign(&key_pair.signing_key);
     if !socket.send_and_wait_ack(msg, relay_addr, ack_waiter, &logs).await {
         println!("[ERROR] No ack from relay, aborting");
         return None;

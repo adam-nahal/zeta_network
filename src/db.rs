@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use ed25519_dalek::VerifyingKey;
 use rusqlite::{params, Connection, Result};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -21,7 +22,8 @@ impl DbManager {
                 addr TEXT PRIMARY KEY,
                 id TEXT NOT NULL,
                 last_seen INTEGER NOT NULL,
-                is_relay INTEGER NOT NULL
+                is_relay INTEGER NOT NULL,
+                verifying_key BLOB NOT NULL
             )",
             [],
         )?;
@@ -36,6 +38,7 @@ impl DbManager {
                 msg_type TEXT NOT NULL,
                 payload TEXT,
                 last_hop TEXT NOT NULL,
+                signature BLOB NOT NULL,
                 UNIQUE(msg_id, time, src_id)
             )",
             [],
@@ -49,18 +52,23 @@ impl DbManager {
 
 	pub async fn get_peers_from_db(&self) -> Result<PeersMap> {
 	    let conn = self.conn.lock().await;
-	    let mut stmt = conn.prepare("SELECT addr, id, last_seen, is_relay FROM peers")?;
+	    let mut stmt = conn.prepare("SELECT addr, id, last_seen, is_relay, verifying_key FROM peers")?;
 	    let mut rows = stmt.query([])?;
 	    let peers = Arc::new(Mutex::new(HashMap::new()));
 	    while let Some(row) = rows.next()? {
-	        let addr_str: String = row.get(0)?;
-	        let addr = addr_str.parse::<SocketAddr>()
-	            .map_err(|_| rusqlite::Error::InvalidColumnType(0, "SocketAddr".to_string(), rusqlite::types::Type::Text))?;
+	        let addr: SocketAddr = row.get::<_, String>(0)?.parse()
+	        	.expect("[ERROR] Badly formated addr in db");
+	        let verifying_key: [u8; 32] = row.get::<_, Vec<u8>>(4)?.try_into()
+	        	.expect("[ERROR] Badly formated verifying_key in db");
+	        let verifying_key: VerifyingKey = VerifyingKey::from_bytes(&verifying_key)
+	        	.expect("[ERROR] Badly formated verifying_key in db");
+
 	        peers.lock().await.insert(addr, PeerInfo {
 	            addr,
 	            id: row.get(1)?,
 	            last_seen: row.get(2)?,
 	            is_relay: row.get(3)?,
+	            verifying_key,
 	        });
 	    }
 	    Ok(peers)
@@ -69,7 +77,7 @@ impl DbManager {
 	pub async fn get_logs_from_db(&self) -> Result<MessagesMap> {
 	    let conn = self.conn.lock().await;
 	    let mut stmt = conn.prepare(
-	        "SELECT msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload, last_hop FROM logs"
+	        "SELECT msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload, last_hop, signature FROM logs"
 	    )?;
 	    let mut rows = stmt.query([])?;
 	    let logs = Arc::new(Mutex::new(Vec::new()));
@@ -93,9 +101,25 @@ impl DbManager {
 	                let peer_id   = parts.next().unwrap_or("").to_string();
 	                Payload::RelayHasNewClient { peer_addr, peer_id }
 	            }
-	            ("Register", _)          => Payload::Register,
+	            ("BeNewRelay", Some(hex_str)) => {
+	            	let bytes = hex::decode(hex_str)
+	                    .map_err(|_| rusqlite::Error::InvalidColumnType(7, "Hex string".into(), rusqlite::types::Type::Text))?;
+	                let key_bytes: [u8; 32] = bytes.try_into()
+	                    .map_err(|_| rusqlite::Error::InvalidColumnType(7, "32-byte array".into(), rusqlite::types::Type::Text))?;
+	                let verifying_key = VerifyingKey::from_bytes(&key_bytes)
+	                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(e)))?;
+	            	Payload::BeNewRelay { verifying_key }
+	        	}
+	            ("Register", Some(hex_str)) => {
+	            	let bytes = hex::decode(hex_str)
+	                    .map_err(|_| rusqlite::Error::InvalidColumnType(7, "Hex string".into(), rusqlite::types::Type::Text))?;
+	                let key_bytes: [u8; 32] = bytes.try_into()
+	                    .map_err(|_| rusqlite::Error::InvalidColumnType(7, "32-byte array".into(), rusqlite::types::Type::Text))?;
+	                let verifying_key = VerifyingKey::from_bytes(&key_bytes)
+	                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(e)))?;
+	                Payload::Register { verifying_key }
+	            }
 	            ("Connect", _)           => Payload::Connect,
-	            ("BeNewRelay", _)        => Payload::BeNewRelay,
 	            ("NeedRelay", _)         => Payload::NeedRelay,
 	            ("NoRelayAvailable", _)  => Payload::NoRelayAvailable,
 	            ("PunchTheHole", _)      => Payload::PunchTheHole,
@@ -110,6 +134,7 @@ impl DbManager {
 	                src_id:   row.get(3)?,
 	                dst_addr: row.get::<_, String>(4)?.parse().map_err(|_| rusqlite::Error::InvalidColumnType(4, "SocketAddr".into(), rusqlite::types::Type::Text))?,
 	                dst_id:   row.get(5)?,
+	                signature: row.get(9)?,
 	            },
 	            payload,
 	            last_hop: row.get::<_, String>(8)?.parse().map_err(|_| rusqlite::Error::InvalidColumnType(4, "SocketAddr".into(), rusqlite::types::Type::Text))?,
@@ -118,7 +143,7 @@ impl DbManager {
 	    Ok(logs)
 	}
 
-	pub async fn refresh_peers(&self, peer_map: &PeersMap) -> Result<()> {
+	pub async fn refresh_peers_in_db(&self, peer_map: &PeersMap) -> Result<()> {
 	    let peers_guard = peer_map.lock().await;
 	    let mut conn = self.conn.lock().await;
 	    let tx = conn.transaction()?;  // Permet l'atomicité du refresh (soit tout est maj, soit rien)
@@ -126,13 +151,13 @@ impl DbManager {
 	    // Ajoute ou met à jour les noeuds de la base de données
 	    for (addr, peer_info) in peers_guard.iter() {
 	        tx.execute(
-	            "INSERT INTO peers (addr, id, last_seen, is_relay)
-	             VALUES (?1, ?2, ?3, ?4)
+	            "INSERT INTO peers (addr, id, last_seen, is_relay, verifying_key)
+	             VALUES (?1, ?2, ?3, ?4, ?5)
 	             ON CONFLICT(addr) DO UPDATE SET
 	                 id = excluded.id,
 	                 last_seen = excluded.last_seen,
 	                 is_relay = excluded.is_relay",
-	            params![addr.to_string(), peer_info.id, peer_info.last_seen, peer_info.is_relay],
+	            params![addr.to_string(), peer_info.id, peer_info.last_seen, peer_info.is_relay, peer_info.verifying_key.as_bytes().to_vec()],
 	        )?;
 	    }
 
@@ -151,28 +176,28 @@ impl DbManager {
 	    Ok(())
 	}
 
-    pub async fn refresh_logs(&self, logs: &MessagesMap) -> Result<()> {
-	    let logs2 = logs.lock().await;
+    pub async fn refresh_logs_in_db(&self, logs: &MessagesMap) -> Result<()> {
+	    let logs = logs.lock().await;
         let mut conn = self.conn.lock().await;
 	    let tx = conn.transaction()?;
 
-        for log in logs2.iter() {
+        for log in logs.iter() {
 	        let (msg_type, payload) = match &log.payload {
 	            Payload::Classic { txt } => ("Classic", Some(txt.clone())),
 			    Payload::Ack { reply_to } => ("Ack", Some(reply_to.to_string())),
 			    Payload::PeerInfo { peer_addr, peer_id } => ("PeerInfo", Some(format!("{}|{}", peer_addr, peer_id))),
 			    Payload::RelayHasNewClient { peer_addr, peer_id } => ("RelayHasNewClient", Some(format!("{}|{}", peer_addr, peer_id))),
 			    Payload::AskForAddr { peer_id } => ("AskForAddr", Some(peer_id.clone())),
-			    Payload::Register => ("Register", None),
+			    Payload::Register { verifying_key } => ("Register", Some(hex::encode(verifying_key.to_bytes()))),
 			    Payload::Connect => ("Connect", None),
-			    Payload::BeNewRelay => ("BeNewRelay", None),
+			    Payload::BeNewRelay { verifying_key } => ("BeNewRelay", Some(hex::encode(verifying_key.to_bytes()))),
 			    Payload::NeedRelay => ("NeedRelay", None),
 			    Payload::NoRelayAvailable => ("NoRelayAvailable", None),
 			    Payload::PunchTheHole => ("PunchTheHole", None),
 	        };
 	        tx.execute(
-	            "INSERT OR IGNORE INTO logs (msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload, last_hop)
-	             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+	            "INSERT OR IGNORE INTO logs (msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload, last_hop, signature)
+	             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
 	            params![
 	                log.headers.msg_id,
 	                log.headers.time,
@@ -180,9 +205,10 @@ impl DbManager {
 	                log.headers.src_id,
 	                log.headers.dst_addr.to_string(),
 	                log.headers.dst_id,
-	                msg_type,
+	                msg_type.to_string(),
 	                payload,
 	                log.last_hop.to_string(),
+	                log.headers.signature,
 	            ],
 	        )?;
 	    }

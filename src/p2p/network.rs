@@ -56,7 +56,7 @@ pub async fn recv_msg(socket: &UdpSocket) -> Option<(Message, SocketAddr)> {
         }
     };
 
-    if size == 0 || size >= MAX_PACKET_SIZE {
+    if size == 0 || size > MAX_PACKET_SIZE {
         println!("The message's size is incorrect({})", size);
         return None;
     }    

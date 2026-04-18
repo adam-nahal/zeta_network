@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::sync::Mutex;
 use serde::{Serialize, Deserialize};
+use ed25519_dalek::VerifyingKey;
 
 use crate::p2p::utils::*;
 
@@ -14,6 +15,7 @@ pub struct PeerInfo {
     pub id: String,
     pub last_seen: u64,
     pub is_relay: bool,
+    pub verifying_key: VerifyingKey,
 }
 
 pub type PeersMap    = Arc<Mutex<HashMap<SocketAddr, PeerInfo>>>;
@@ -28,13 +30,14 @@ pub struct Headers {
     pub dst_addr: SocketAddr,
     pub dst_id:   String,
     pub time:     u64,
+    pub signature: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Payload {
-    Register,  // Client → Relay : "Je m'enregistre, voici mon adresse et mon id"
+    Register {  verifying_key: VerifyingKey },  // Client → Relay : "Je m'enregistre, voici mon adresse et mon id"
     Connect,  // Dial → Relay : "Mets-moi en contact avec ce peer_id"
-    BeNewRelay,  // new Relay → Serveur stockant les adresses des relais : "Je me déclare relay"
+    BeNewRelay { verifying_key: VerifyingKey },  // new Relay → Serveur stockant les adresses des relais : "Je me déclare relay"
     NeedRelay,
     NoRelayAvailable,
     PunchTheHole,
@@ -55,7 +58,7 @@ pub struct Message {
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.payload {
-            Payload::Register => {
+            Payload::Register { .. } => {
                 write!(f, "[Register] [{}]", self.headers)
             }
             Payload::Connect => {
@@ -70,7 +73,7 @@ impl fmt::Display for Message {
             Payload::Classic { txt } => {
                 write!(f, "[Classic] [{}] \"{}\"", self.headers, txt)
             }
-            Payload::BeNewRelay => {
+            Payload::BeNewRelay { .. } => {
                 write!(f, "[BeNewRelay] [{}]", self.headers)
             }
             Payload::NeedRelay => {
