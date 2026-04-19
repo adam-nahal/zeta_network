@@ -1,6 +1,5 @@
 use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
-use rand::rngs::OsRng;
-use anyhow::Result;
+use sha2::{Sha256, Digest};
 
 use crate::types::*;
 
@@ -13,7 +12,7 @@ pub struct AuthKeys {
 
 impl AuthKeys {
     pub fn generate() -> Self {
-        let mut csprng = OsRng;
+        let mut csprng = rand::rngs::OsRng;
         let signing_key = SigningKey::generate(&mut csprng);
         let verifying_key = signing_key.verifying_key();
         Self { signing_key, verifying_key }
@@ -21,7 +20,7 @@ impl AuthKeys {
 }
 
 impl Message {
-    pub fn sign(&mut self, signing_key: &SigningKey) -> Result<()> {  
+    pub fn sign(&mut self, signing_key: &SigningKey) -> anyhow::Result<()> {  
     	// Enlève la signature du message
         let mut headers_without_sig = self.headers.clone();
         headers_without_sig.signature = vec![];
@@ -58,4 +57,17 @@ impl Message {
 	    // Vérifier
 	    verifying_key.verify(&to_verify, &signature).is_ok()
 	}
+}
+
+pub fn peer_id_from_verifying_key(verifying_key: &VerifyingKey) -> PeerId {
+    let key_bytes = verifying_key.to_bytes();
+    let hash = Sha256::digest(&key_bytes);
+    hash.to_vec() // conversion en Vec<u8>
+}
+
+pub async fn get_verifying_key(peers: PeersMap, username: String) -> Option<VerifyingKey> {
+	let peers = peers.lock().await;
+	peers.values()
+		.find(|peer_info| peer_info.username == username)
+		.map(|peer_info| peer_info.verifying_key)
 }

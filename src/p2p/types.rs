@@ -9,16 +9,19 @@ use ed25519_dalek::VerifyingKey;
 use crate::p2p::utils::*;
 
 
-#[derive(Debug, Clone)]
+pub type PeerId = Vec<u8>;
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PeerInfo {
+	pub id: PeerId,  // hash256 de la verifying_key (unique)
     pub addr: SocketAddr,
-    pub id: String,
+    pub username: String,
     pub last_seen: u64,
     pub is_relay: bool,
     pub verifying_key: VerifyingKey,
 }
 
-pub type PeersMap    = Arc<Mutex<HashMap<SocketAddr, PeerInfo>>>;
+pub type PeersMap = Arc<Mutex<HashMap<PeerId, PeerInfo>>>;
 pub type MessagesMap = Arc<Mutex<Vec<Message>>>;
 pub const MAX_PACKET_SIZE: usize = 4096;
 
@@ -42,8 +45,8 @@ pub enum Payload {
     NoRelayAvailable,
     PunchTheHole,
     Classic { txt: String },  // Peer → Peer : message direct (hole punching, hello, etc.)
-    AskForAddr { peer_id: String },  // Relay → Client : "Voici l'adresse+id du peer que tu cherches"
-    PeerInfo { peer_addr: SocketAddr, peer_id: String },  // Relay → Client : "Voici l'adresse+id du peer que tu cherches"
+    AskForAddr { username: String },  // Relay → Client : "Voici l'adresse+id du peer que tu cherches"
+    PeerInfo { peer_info: PeerInfo },  // Relay → Client : "Voici l'adresse+id du peer que tu cherches"
     RelayHasNewClient { peer_addr: SocketAddr, peer_id: String },
     Ack { reply_to: u64 },
 }
@@ -64,11 +67,11 @@ impl fmt::Display for Message {
             Payload::Connect => {
                 write!(f, "[Connect] [{}]", self.headers)
             }
-            Payload::AskForAddr { peer_id } => {
-                write!(f, "[AskForAddr] [{}] He asks for {}'s addr", self.headers, peer_id)
+            Payload::AskForAddr { username } => {
+                write!(f, "[AskForAddr] [{}] He asks for {}'s addr", self.headers, username)
             }
-            Payload::PeerInfo { peer_addr, peer_id } => {
-                write!(f, "[PeerInfo] [{}] {} ({})", self.headers, peer_addr, peer_id)
+            Payload::PeerInfo { peer_info } => {
+                write!(f, "[PeerInfo] [{}] {} ({})", self.headers, peer_info.addr, peer_info.username)
             }
             Payload::Classic { txt } => {
                 write!(f, "[Classic] [{}] \"{}\"", self.headers, txt)

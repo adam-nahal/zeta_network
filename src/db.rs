@@ -19,8 +19,9 @@ impl DbManager {
         let conn = Connection::open(db_path)?;
         conn.execute(
             "CREATE TABLE IF NOT EXISTS peers (
-                addr TEXT PRIMARY KEY,
-                id TEXT NOT NULL,
+            	id TEXT PRIMARY KEY,
+                addr TEXT NOT NULL,
+                username TEXT NOT NULL,
                 last_seen INTEGER NOT NULL,
                 is_relay INTEGER NOT NULL,
                 verifying_key BLOB NOT NULL
@@ -52,22 +53,23 @@ impl DbManager {
 
 	pub async fn get_peers_from_db(&self) -> Result<PeersMap> {
 	    let conn = self.conn.lock().await;
-	    let mut stmt = conn.prepare("SELECT addr, id, last_seen, is_relay, verifying_key FROM peers")?;
+	    let mut stmt = conn.prepare("SELECT id, addr, username, last_seen, is_relay, verifying_key FROM peers")?;
 	    let mut rows = stmt.query([])?;
 	    let peers = Arc::new(Mutex::new(HashMap::new()));
 	    while let Some(row) = rows.next()? {
-	        let addr: SocketAddr = row.get::<_, String>(0)?.parse()
+	        let addr: SocketAddr = row.get::<_, String>(1)?.parse()
 	        	.expect("[ERROR] Badly formated addr in db");
-	        let verifying_key: [u8; 32] = row.get::<_, Vec<u8>>(4)?.try_into()
+	        let verifying_key: [u8; 32] = row.get::<_, Vec<u8>>(5)?.try_into()
 	        	.expect("[ERROR] Badly formated verifying_key in db");
 	        let verifying_key: VerifyingKey = VerifyingKey::from_bytes(&verifying_key)
 	        	.expect("[ERROR] Badly formated verifying_key in db");
 
-	        peers.lock().await.insert(addr, PeerInfo {
+	        peers.lock().await.insert(row.get(0)?, PeerInfo {
+	        	id: row.get(0)?,
 	            addr,
-	            id: row.get(1)?,
-	            last_seen: row.get(2)?,
-	            is_relay: row.get(3)?,
+	            username: row.get(2)?,
+	            last_seen: row.get(3)?,
+	            is_relay: row.get(4)?,
 	            verifying_key,
 	        });
 	    }
@@ -87,13 +89,21 @@ impl DbManager {
 
 	        let payload = match (msg_type.as_str(), payload_str.as_deref()) {
 	            ("Classic", Some(txt))         => Payload::Classic { txt: txt.to_string() },
-	            ("AskForAddr", Some(peer_id))  => Payload::AskForAddr { peer_id: peer_id.to_string() },
-	            ("Ack", Some(s))               => Payload::Ack { reply_to: s.parse().unwrap_or(0) },
-	            ("PeerInfo", Some(s))          => {
-	                let mut parts = s.splitn(2, '|');
-	                let peer_addr = parts.next().unwrap_or("0.0.0.0:0").parse().unwrap();
-	                let peer_id   = parts.next().unwrap_or("").to_string();
-	                Payload::PeerInfo { peer_addr, peer_id }
+	            ("AskForAddr", Some(username))  => Payload::AskForAddr { username: username.to_string() },
+	            ("Ack", Some(msg_id))               => Payload::Ack { reply_to: msg_id.parse().unwrap_or(0) },
+	            ("PeerInfo", Some(peer_info))          => {
+	                let mut parts = peer_info.splitn(6, '|');
+	                Payload::PeerInfo { peer_info: PeerInfo {
+	                	id: parts.next().expect("Wrong id in db").as_bytes().to_vec(),
+	                	addr: parts.next().expect("Wrong addr in db").parse().expect("Wrong addr in db"), 
+	                	username: parts.next().expect("Wrong addr in db").to_string(),
+	                	last_seen: parts.next().expect("Wrong last_seen in db").parse().expect("Wrong last_seen in db"),
+	                	is_relay: parts.next().expect("Wrong bool in db").parse().expect("Wrong bool in db"),
+	                	verifying_key: VerifyingKey::from_bytes(
+							&hex::decode(parts.next().expect("Missing verifying_key"))
+								.expect("Invalid hex").try_into().expect("Not 32 bytes")
+						).expect("Invalid verifying_key in db"),
+	                }}
 	            }
 	            ("RelayHasNewClient", Some(s)) => {
 	                let mut parts = s.splitn(2, '|');
@@ -143,32 +153,32 @@ impl DbManager {
 	    Ok(logs)
 	}
 
-	pub async fn refresh_peers_in_db(&self, peer_map: &PeersMap) -> Result<()> {
-	    let peers_guard = peer_map.lock().await;
+	pub async fn refresh_peers_in_db(&self, peers: &PeersMap) -> Result<()> {
+	    let peers = peers.lock().await;
 	    let mut conn = self.conn.lock().await;
 	    let tx = conn.transaction()?;  // Permet l'atomicité du refresh (soit tout est maj, soit rien)
 
 	    // Ajoute ou met à jour les noeuds de la base de données
-	    for (addr, peer_info) in peers_guard.iter() {
+	    for (id, peer_info) in peers.iter() {
 	        tx.execute(
-	            "INSERT INTO peers (addr, id, last_seen, is_relay, verifying_key)
-	             VALUES (?1, ?2, ?3, ?4, ?5)
+	            "INSERT INTO peers (id, addr, username, last_seen, is_relay, verifying_key)
+	             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
 	             ON CONFLICT(addr) DO UPDATE SET
 	                 id = excluded.id,
 	                 last_seen = excluded.last_seen,
 	                 is_relay = excluded.is_relay",
-	            params![addr.to_string(), peer_info.id, peer_info.last_seen, peer_info.is_relay, peer_info.verifying_key.as_bytes().to_vec()],
+	            params![id, peer_info.addr.to_string(), peer_info.username, peer_info.last_seen, peer_info.is_relay, peer_info.verifying_key.as_bytes().to_vec()],
 	        )?;
 	    }
 
 	    // Supprime les noeuds déconnectés ou anciens
-	    let placeholders = peers_guard
+	    let placeholders = peers
 	        .keys()
 	        .enumerate()
 	        .map(|(i, _)| format!("?{}", i + 1))
 	        .collect::<Vec<_>>()
 	        .join(", ");
-	    let addrs: Vec<String> = peers_guard.keys().map(|a| a.to_string()).collect();
+	    let addrs: Vec<String> = peers.values().map(|peer_info| peer_info.addr.to_string()).collect();
 	    let query = format!("DELETE FROM peers WHERE addr NOT IN ({})", placeholders);
 	    tx.execute(&query, rusqlite::params_from_iter(addrs.iter()))?;
 
@@ -185,9 +195,9 @@ impl DbManager {
 	        let (msg_type, payload) = match &log.payload {
 	            Payload::Classic { txt } => ("Classic", Some(txt.clone())),
 			    Payload::Ack { reply_to } => ("Ack", Some(reply_to.to_string())),
-			    Payload::PeerInfo { peer_addr, peer_id } => ("PeerInfo", Some(format!("{}|{}", peer_addr, peer_id))),
+			    Payload::PeerInfo { peer_info } => ("PeerInfo", Some(format!("{}|{}", peer_info.addr, peer_info.username))),
 			    Payload::RelayHasNewClient { peer_addr, peer_id } => ("RelayHasNewClient", Some(format!("{}|{}", peer_addr, peer_id))),
-			    Payload::AskForAddr { peer_id } => ("AskForAddr", Some(peer_id.clone())),
+			    Payload::AskForAddr { username } => ("AskForAddr", Some(username.clone())),
 			    Payload::Register { verifying_key } => ("Register", Some(hex::encode(verifying_key.to_bytes()))),
 			    Payload::Connect => ("Connect", None),
 			    Payload::BeNewRelay { verifying_key } => ("BeNewRelay", Some(hex::encode(verifying_key.to_bytes()))),

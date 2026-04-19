@@ -6,6 +6,7 @@ use std::net::SocketAddr;
 
 use crate::p2p::network::*;
 use crate::p2p::types::*;
+use crate::p2p::auth::*;
 
 
 pub type MsgItem     = (Message, SocketAddr);
@@ -60,9 +61,13 @@ pub fn create_node_channels() -> (NodeDispatcher, NodeInbox) {
 }
 
 impl NodeDispatcher {
-    pub async fn run(self, socket: Arc<UdpSocket>, logs: MessagesMap) {
+    pub async fn run(self, socket: Arc<UdpSocket>, logs: MessagesMap, peers: PeersMap) {
         loop {
             let Some((msg, addr)) = recv_msg(&socket).await else { continue };
+            // vérifie l'authenticité d'un message
+            let verifying_key = get_verifying_key(Arc::clone(&peers), msg.headers.src_id.clone()).await.unwrap();
+            println!("Authentification: {}", msg.verify(&verifying_key));
+
             logs.lock().await.push(msg.clone());
             match &msg.payload {
                 Payload::Ack { reply_to } => {

@@ -18,7 +18,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 	}
 
 	// Création des clés d'authentification
-	let key_pair: AuthKeys = AuthKeys::generate();
+	let auth_keys: AuthKeys = AuthKeys::generate();
 
 	// Initialise la base de données et initialise le compteur msg_id
 	let db = DbManager::new("hub_relay.db").await.expect("Cannot open the database");
@@ -66,11 +66,12 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 			// Un relai se déclare : on l'ajoute/met à jour dans la map
 			Payload::BeNewRelay { verifying_key } => {
 				relays.lock().await
-					.entry(msg_rcv.headers.src_addr)
+					.entry(peer_id_from_verifying_key(verifying_key))
 					.and_modify(|peer_info| peer_info.last_seen = msg_rcv.headers.time)
 					.or_insert(PeerInfo {
+					    id: peer_id_from_verifying_key(verifying_key),
+						username: msg_rcv.headers.src_id.clone(),
 					    addr: msg_rcv.headers.src_addr,
-					    id: msg_rcv.headers.src_id.clone(),
 					    last_seen: msg_rcv.headers.time,
 					    is_relay: true,
 					    verifying_key: *verifying_key,
@@ -90,7 +91,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 					payload: Payload::Ack { reply_to: msg_rcv.headers.msg_id },
 					last_hop: public_addr,
 				};
-				let _ = msg.sign(&key_pair.signing_key);
+				let _ = msg.sign(&auth_keys.signing_key);
 				let _ = socket.send_msg(msg, msg_rcv.headers.src_addr, &logs).await;
 			}
 
@@ -99,10 +100,10 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 				let relay_info = {
 					let relays = relays.lock().await;
 					relays.iter()
-						.find(|(addr, _)| **addr != msg_rcv.headers.src_addr)
-						.map(|(addr, peer_info)| (*addr, peer_info.id.clone()))
+						.find(|(_, peer_info)| peer_info.addr != msg_rcv.headers.src_addr)
+						.map(|(_, peer_info)| peer_info.clone())
 				};
-				if let Some((relay_addr, relay_id)) = relay_info {
+				if let Some (relay_info) = relay_info {
 					let mut msg = Message {
 						headers: Headers {
 							msg_id: new_msg_id(),
@@ -113,10 +114,10 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 							time: now_secs(),
 							signature: vec![], 
 						},
-						payload: Payload::PeerInfo { peer_addr: relay_addr, peer_id: relay_id.clone() },
+						payload: Payload::PeerInfo { peer_info: relay_info.clone() },
 						last_hop: public_addr,
 					};
-					let _ = msg.sign(&key_pair.signing_key);
+					let _ = msg.sign(&auth_keys.signing_key);
 					let _ = socket.send_msg(msg, msg_rcv.headers.src_addr, &logs).await;
 
 					// Avertissons le relais concerné
@@ -125,16 +126,16 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 							msg_id: new_msg_id(),
 							src_addr: public_addr,
 							src_id: "hub".to_string(),
-							dst_addr: relay_addr,
-							dst_id: relay_id,
+							dst_addr: relay_info.addr,
+							dst_id: relay_info.username.clone(),
 							time: now_secs(),
 							signature: vec![], 
 						},
 						payload: Payload::RelayHasNewClient { peer_addr: msg_rcv.headers.src_addr, peer_id: msg_rcv.headers.src_id.clone()},
 						last_hop: public_addr,
 					};
-					let _ = msg.sign(&key_pair.signing_key);
-					let _ = socket.send_msg(msg, relay_addr, &logs).await;
+					let _ = msg.sign(&auth_keys.signing_key);
+					let _ = socket.send_msg(msg, relay_info.addr, &logs).await;
 				} else {
 					let mut msg = Message {
 						headers: Headers {
@@ -149,7 +150,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 						payload: Payload::NoRelayAvailable,
 						last_hop: public_addr,
 					};
-					let _ = msg.sign(&key_pair.signing_key);
+					let _ = msg.sign(&auth_keys.signing_key);
 					let _ = socket.send_msg(msg, msg_rcv.headers.src_addr, &logs).await;
 				}
 			}
