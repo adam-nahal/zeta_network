@@ -23,7 +23,7 @@ pub struct PeerInfo {
 
 pub type PeersMap = Arc<Mutex<HashMap<PeerId, PeerInfo>>>;
 pub type MessagesMap = Arc<Mutex<Vec<Message>>>;
-pub const MAX_PACKET_SIZE: usize = 4096;
+pub const MAX_PACKET_SIZE: usize = 65536;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Headers {

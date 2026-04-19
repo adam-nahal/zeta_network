@@ -57,6 +57,7 @@ impl DbManager {
 	    let mut rows = stmt.query([])?;
 	    let peers = Arc::new(Mutex::new(HashMap::new()));
 	    while let Some(row) = rows.next()? {
+	        let id: Vec<u8> = row.get(0)?;
 	        let addr: SocketAddr = row.get::<_, String>(1)?.parse()
 	        	.expect("[ERROR] Badly formated addr in db");
 	        let verifying_key: [u8; 32] = row.get::<_, Vec<u8>>(5)?.try_into()
@@ -64,8 +65,8 @@ impl DbManager {
 	        let verifying_key: VerifyingKey = VerifyingKey::from_bytes(&verifying_key)
 	        	.expect("[ERROR] Badly formated verifying_key in db");
 
-	        peers.lock().await.insert(row.get(0)?, PeerInfo {
-	        	id: row.get(0)?,
+	        peers.lock().await.insert(id.clone(), PeerInfo {
+	        	id,
 	            addr,
 	            username: row.get(2)?,
 	            last_seen: row.get(3)?,
@@ -163,7 +164,7 @@ impl DbManager {
 	        tx.execute(
 	            "INSERT INTO peers (id, addr, username, last_seen, is_relay, verifying_key)
 	             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-	             ON CONFLICT(addr) DO UPDATE SET
+	             ON CONFLICT(id) DO UPDATE SET
 	                 id = excluded.id,
 	                 last_seen = excluded.last_seen,
 	                 is_relay = excluded.is_relay",
@@ -195,7 +196,7 @@ impl DbManager {
 	        let (msg_type, payload) = match &log.payload {
 	            Payload::Classic { txt } => ("Classic", Some(txt.clone())),
 			    Payload::Ack { reply_to } => ("Ack", Some(reply_to.to_string())),
-			    Payload::PeerInfo { peer_info } => ("PeerInfo", Some(format!("{}|{}", peer_info.addr, peer_info.username))),
+			    Payload::PeerInfo { peer_info } => ("PeerInfo", Some(format!("{:?}|{}|{}|{}|{}|{:?}", peer_info.id, peer_info.addr, peer_info.username, peer_info.last_seen, peer_info.is_relay, peer_info.verifying_key ))),
 			    Payload::RelayHasNewClient { peer_addr, peer_id } => ("RelayHasNewClient", Some(format!("{}|{}", peer_addr, peer_id))),
 			    Payload::AskForAddr { username } => ("AskForAddr", Some(username.clone())),
 			    Payload::Register { verifying_key } => ("Register", Some(hex::encode(verifying_key.to_bytes()))),

@@ -65,8 +65,11 @@ impl NodeDispatcher {
         loop {
             let Some((msg, addr)) = recv_msg(&socket).await else { continue };
             // vérifie l'authenticité d'un message
-            let verifying_key = get_verifying_key(Arc::clone(&peers), msg.headers.src_id.clone()).await.unwrap();
-            println!("Authentification: {}", msg.verify(&verifying_key));
+            if let Some(verifying_key) = get_verifying_key(Arc::clone(&peers), msg.headers.src_id.clone()).await {
+            	println!("Authentification: {}", msg.verify(&verifying_key));
+            } else {
+            	println!("[ERROR] No verifying_key known for username {}", msg.headers.src_id.clone());
+            }
 
             logs.lock().await.push(msg.clone());
             match &msg.payload {

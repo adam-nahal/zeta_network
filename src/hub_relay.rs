@@ -28,12 +28,17 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 	let relays: PeersMap = db.get_peers_from_db().await.expect("[ERROR] Initialisation of database failed");
 	let logs: MessagesMap = db.get_logs_from_db().await.expect("[ERROR] Initialisation of database failed");
 
-    // Suppression automatique des noeuds inactifs
+    // Suppression automatique des noeuds inactifs et des logs trop vieux
     tokio::spawn({
 	    let relays = Arc::clone(&relays);
+	    let logs = Arc::clone(&logs);
 	    async move {
 	        loop {
 	            delete_disconnected_peers(&relays).await;
+	            let mut logs = logs.lock().await;
+	        	if logs.len() > 10_000 {
+				    logs.drain(0..1000);
+				}
 	            sleep(Duration::from_secs(10)).await;
 	        }
 	    }
@@ -67,12 +72,12 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 			Payload::BeNewRelay { verifying_key } => {
 				relays.lock().await
 					.entry(peer_id_from_verifying_key(verifying_key))
-					.and_modify(|peer_info| peer_info.last_seen = msg_rcv.headers.time)
+					.and_modify(|peer_info| peer_info.last_seen = now_secs())
 					.or_insert(PeerInfo {
 					    id: peer_id_from_verifying_key(verifying_key),
 						username: msg_rcv.headers.src_id.clone(),
 					    addr: msg_rcv.headers.src_addr,
-					    last_seen: msg_rcv.headers.time,
+					    last_seen: now_secs(),
 					    is_relay: true,
 					    verifying_key: *verifying_key,
 					});

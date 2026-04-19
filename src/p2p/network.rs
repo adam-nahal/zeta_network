@@ -47,7 +47,7 @@ pub async fn get_public_ip(socket: &UdpSocket) -> Result<SocketAddr> {
 }
 
 pub async fn recv_msg(socket: &UdpSocket) -> Option<(Message, SocketAddr)> {
-    let mut buf = [0; MAX_PACKET_SIZE];
+    let mut buf = [0; MAX_PACKET_SIZE + 1];
     let (size, sender_addr) = match socket.recv_from(&mut buf).await {
         Ok(res) => res,
         Err(e) => {

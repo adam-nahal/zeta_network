@@ -98,12 +98,12 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		        if let Payload::Register { verifying_key } = &msg_rcv.payload {
 		            peers.lock().await
 		                .entry(peer_id_from_verifying_key(verifying_key))  // La clé existe-t-elle déjà ?
-		                .and_modify(|peer_info| peer_info.last_seen = msg_rcv.headers.time)
+		                .and_modify(|peer_info| peer_info.last_seen = now_secs())
 		                .or_insert(PeerInfo {
 		                	id: peer_id_from_verifying_key(verifying_key),
 						    addr: msg_rcv.headers.src_addr,
 						    username: msg_rcv.headers.src_id.clone(),
-						    last_seen: msg_rcv.headers.time,
+						    last_seen: now_secs(),
 						    is_relay: false,
 						    verifying_key: *verifying_key
 					});
@@ -128,7 +128,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		        // Relaie le message si c'est un message à relayer
 		        if let Payload::Classic { .. } = &msg_rcv.payload {
 		            if public_addr != msg_rcv.headers.dst_addr {
-		                relay_message(&peers, msg_rcv.headers.src_addr, msg_rcv.clone(), &socket, &logs).await;
+		                relay_message(&peers, public_addr, msg_rcv.clone(), &socket, &logs).await;
 		            }
 		        }
 

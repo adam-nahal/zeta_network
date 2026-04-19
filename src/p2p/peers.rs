@@ -19,12 +19,12 @@ pub async fn delete_disconnected_peers(peers: &PeersMap) {
     });
 }
 
-pub async fn relay_message(peers: &PeersMap, sender_addr: SocketAddr, mut msg: Message, socket: &UdpSocket, logs: &MessagesMap) {
+pub async fn relay_message(peers: &PeersMap, relayer_addr: SocketAddr, mut msg: Message, socket: &UdpSocket, logs: &MessagesMap) {
     let peers = peers.lock().await;
 
+    msg.last_hop = relayer_addr;
     for (_, peer_info) in peers.iter() {
-        if peer_info.addr != sender_addr {
-        	msg.last_hop = sender_addr;
+        if peer_info.addr != relayer_addr {
             if let Err(e) = socket.send_msg(msg.clone(), peer_info.addr, logs).await {
                 eprintln!("Failed to send to {}: {}", peer_info.addr, e);
             } else {
