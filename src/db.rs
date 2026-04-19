@@ -33,14 +33,13 @@ impl DbManager {
                 msg_id INTEGER NOT NULL,
                 time INTEGER NOT NULL,
                 src_addr TEXT NOT NULL,
-                src_id TEXT NOT NULL,
+                src_username TEXT NOT NULL,
                 dst_addr TEXT NOT NULL,
-                dst_id TEXT NOT NULL,
+                dst_username TEXT NOT NULL,
                 msg_type TEXT NOT NULL,
                 payload TEXT,
                 last_hop TEXT NOT NULL,
-                signature BLOB NOT NULL,
-                UNIQUE(msg_id, time, src_id)
+                signature BLOB PRIMARY KEY
             )",
             [],
         )?;
@@ -80,7 +79,7 @@ impl DbManager {
 	pub async fn get_logs_from_db(&self) -> Result<MessagesMap> {
 	    let conn = self.conn.lock().await;
 	    let mut stmt = conn.prepare(
-	        "SELECT msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload, last_hop, signature FROM logs"
+	        "SELECT msg_id, time, src_addr, src_username, dst_addr, dst_username, msg_type, payload, last_hop, signature FROM logs"
 	    )?;
 	    let mut rows = stmt.query([])?;
 	    let logs = Arc::new(Mutex::new(Vec::new()));
@@ -220,7 +219,7 @@ impl DbManager {
 				    Payload::PunchTheHole => ("PunchTheHole", None),
 		        };
 		        tx.execute(
-		            "INSERT OR IGNORE INTO logs (msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload, last_hop, signature)
+		            "INSERT OR IGNORE INTO logs (msg_id, time, src_addr, src_username, dst_addr, dst_username, msg_type, payload, last_hop, signature)
 		             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
 		            params![
 		                log.headers.msg_id,
