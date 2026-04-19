@@ -155,77 +155,82 @@ impl DbManager {
 	}
 
 	pub async fn refresh_peers_in_db(&self, peers: &PeersMap) -> Result<()> {
-	    let peers = peers.lock().await;
-	    let mut conn = self.conn.lock().await;
-	    let tx = conn.transaction()?;  // Permet l'atomicité du refresh (soit tout est maj, soit rien)
+	    let peers = peers.lock().await.clone();
+	    let conn = Arc::clone(&self.conn);
+	    
+		tokio::task::spawn_blocking(move || -> rusqlite::Result<()> {
+		    // Ajoute ou met à jour les noeuds de la base de données
+	        let mut conn = conn.blocking_lock();
+		    let tx = conn.transaction()?;  // Permet l'atomicité du refresh (soit tout est maj, soit rien)
+		    for (id, peer_info) in peers.iter() {
+		        tx.execute(
+		            "INSERT INTO peers (id, addr, username, last_seen, is_relay, verifying_key)
+		             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+		             ON CONFLICT(id) DO UPDATE SET
+		                 id = excluded.id,
+		                 last_seen = excluded.last_seen,
+		                 is_relay = excluded.is_relay",
+		            params![id, peer_info.addr.to_string(), peer_info.username, peer_info.last_seen, peer_info.is_relay, peer_info.verifying_key.as_bytes().to_vec()],
+		        )?;
+		    }
 
-	    // Ajoute ou met à jour les noeuds de la base de données
-	    for (id, peer_info) in peers.iter() {
-	        tx.execute(
-	            "INSERT INTO peers (id, addr, username, last_seen, is_relay, verifying_key)
-	             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-	             ON CONFLICT(id) DO UPDATE SET
-	                 id = excluded.id,
-	                 last_seen = excluded.last_seen,
-	                 is_relay = excluded.is_relay",
-	            params![id, peer_info.addr.to_string(), peer_info.username, peer_info.last_seen, peer_info.is_relay, peer_info.verifying_key.as_bytes().to_vec()],
-	        )?;
-	    }
+		    // Supprime les noeuds déconnectés ou anciens
+		    let placeholders = peers
+		        .keys()
+		        .enumerate()
+		        .map(|(i, _)| format!("?{}", i + 1))
+		        .collect::<Vec<_>>()
+		        .join(", ");
+		    let addrs: Vec<String> = peers.values().map(|peer_info| peer_info.addr.to_string()).collect();
+		    let query = format!("DELETE FROM peers WHERE addr NOT IN ({})", placeholders);
+		    tx.execute(&query, rusqlite::params_from_iter(addrs.iter()))?;
 
-	    // Supprime les noeuds déconnectés ou anciens
-	    let placeholders = peers
-	        .keys()
-	        .enumerate()
-	        .map(|(i, _)| format!("?{}", i + 1))
-	        .collect::<Vec<_>>()
-	        .join(", ");
-	    let addrs: Vec<String> = peers.values().map(|peer_info| peer_info.addr.to_string()).collect();
-	    let query = format!("DELETE FROM peers WHERE addr NOT IN ({})", placeholders);
-	    tx.execute(&query, rusqlite::params_from_iter(addrs.iter()))?;
-
-	    tx.commit()?;
-	    Ok(())
+		    tx.commit()?;
+		    Ok(())
+		}).await.map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?
 	}
 
     pub async fn refresh_logs_in_db(&self, logs: &MessagesMap) -> Result<()> {
-	    let logs = logs.lock().await;
-        let mut conn = self.conn.lock().await;
-	    let tx = conn.transaction()?;
+	    let logs = logs.lock().await.clone();
+        let conn = Arc::clone(&self.conn);
 
-        for log in logs.iter() {
-	        let (msg_type, payload) = match &log.payload {
-	            Payload::Classic { txt } => ("Classic", Some(txt.clone())),
-			    Payload::Ack { reply_to } => ("Ack", Some(reply_to.to_string())),
-			    Payload::PeerInfo { peer_info } => ("PeerInfo", Some(format!("{:?}|{}|{}|{}|{}|{:?}", peer_info.id, peer_info.addr, peer_info.username, peer_info.last_seen, peer_info.is_relay, peer_info.verifying_key ))),
-			    Payload::RelayHasNewClient { peer_addr, peer_id } => ("RelayHasNewClient", Some(format!("{}|{}", peer_addr, peer_id))),
-			    Payload::AskForAddr { username } => ("AskForAddr", Some(username.clone())),
-			    Payload::Register { verifying_key } => ("Register", Some(hex::encode(verifying_key.to_bytes()))),
-			    Payload::Connect => ("Connect", None),
-			    Payload::BeNewRelay { verifying_key } => ("BeNewRelay", Some(hex::encode(verifying_key.to_bytes()))),
-			    Payload::NeedRelay => ("NeedRelay", None),
-			    Payload::NoRelayAvailable => ("NoRelayAvailable", None),
-			    Payload::PunchTheHole => ("PunchTheHole", None),
-	        };
-	        tx.execute(
-	            "INSERT OR IGNORE INTO logs (msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload, last_hop, signature)
-	             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-	            params![
-	                log.headers.msg_id,
-	                log.headers.time,
-	                log.headers.src_addr.to_string(),
-	                log.headers.src_id,
-	                log.headers.dst_addr.to_string(),
-	                log.headers.dst_id,
-	                msg_type.to_string(),
-	                payload,
-	                log.last_hop.to_string(),
-	                log.headers.signature,
-	            ],
-	        )?;
-	    }
-
-	    tx.commit()?;
-    	Ok(())
+        tokio::task::spawn_blocking(move || -> rusqlite::Result<()> {
+        	let mut conn = conn.blocking_lock();
+        	let tx = conn.transaction()?;
+	        for log in logs.iter() {
+		        let (msg_type, payload) = match &log.payload {
+		            Payload::Classic { txt } => ("Classic", Some(txt.clone())),
+				    Payload::Ack { reply_to } => ("Ack", Some(reply_to.to_string())),
+				    Payload::PeerInfo { peer_info } => ("PeerInfo", Some(format!("{:?}|{}|{}|{}|{}|{:?}", peer_info.id, peer_info.addr, peer_info.username, peer_info.last_seen, peer_info.is_relay, peer_info.verifying_key ))),
+				    Payload::RelayHasNewClient { peer_addr, peer_id } => ("RelayHasNewClient", Some(format!("{}|{}", peer_addr, peer_id))),
+				    Payload::AskForAddr { username } => ("AskForAddr", Some(username.clone())),
+				    Payload::Register { verifying_key } => ("Register", Some(hex::encode(verifying_key.to_bytes()))),
+				    Payload::Connect => ("Connect", None),
+				    Payload::BeNewRelay { verifying_key } => ("BeNewRelay", Some(hex::encode(verifying_key.to_bytes()))),
+				    Payload::NeedRelay => ("NeedRelay", None),
+				    Payload::NoRelayAvailable => ("NoRelayAvailable", None),
+				    Payload::PunchTheHole => ("PunchTheHole", None),
+		        };
+		        tx.execute(
+		            "INSERT OR IGNORE INTO logs (msg_id, time, src_addr, src_id, dst_addr, dst_id, msg_type, payload, last_hop, signature)
+		             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+		            params![
+		                log.headers.msg_id,
+		                log.headers.time,
+		                log.headers.src_addr.to_string(),
+		                log.headers.src_id,
+		                log.headers.dst_addr.to_string(),
+		                log.headers.dst_id,
+		                msg_type.to_string(),
+		                payload,
+		                log.last_hop.to_string(),
+		                log.headers.signature,
+		            ],
+		        )?;
+		    }
+		    tx.commit()?;
+		    Ok(())
+		}).await.map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?
     }
 
     pub async fn get_max_msg_id(&self, public_addr: SocketAddr) -> Result<u64> {

@@ -109,22 +109,6 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 						.map(|(_, peer_info)| peer_info.clone())
 				};
 				if let Some (relay_info) = relay_info {
-					let mut msg = Message {
-						headers: Headers {
-							msg_id: new_msg_id(),
-							src_addr: public_addr,
-							src_id: "hub".to_string(),
-							dst_addr: msg_rcv.headers.src_addr,
-							dst_id: msg_rcv.headers.src_id.clone(),
-							time: now_secs(),
-							signature: vec![], 
-						},
-						payload: Payload::PeerInfo { peer_info: relay_info.clone() },
-						last_hop: public_addr,
-					};
-					let _ = msg.sign(&auth_keys.signing_key);
-					let _ = socket.send_msg(msg, msg_rcv.headers.src_addr, &logs).await;
-
 					// Avertissons le relais concerné
 					let mut msg = Message {
 						headers: Headers {
@@ -141,6 +125,24 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 					};
 					let _ = msg.sign(&auth_keys.signing_key);
 					let _ = socket.send_msg(msg, relay_info.addr, &logs).await;
+
+					// Envoyons au pair les informations de son nouveau relais
+					let mut msg = Message {
+						headers: Headers {
+							msg_id: new_msg_id(),
+							src_addr: public_addr,
+							src_id: "hub".to_string(),
+							dst_addr: msg_rcv.headers.src_addr,
+							dst_id: msg_rcv.headers.src_id.clone(),
+							time: now_secs(),
+							signature: vec![], 
+						},
+						payload: Payload::PeerInfo { peer_info: relay_info.clone() },
+						last_hop: public_addr,
+					};
+					let _ = msg.sign(&auth_keys.signing_key);
+					let _ = socket.send_msg(msg, msg_rcv.headers.src_addr, &logs).await;
+
 				} else {
 					let mut msg = Message {
 						headers: Headers {
