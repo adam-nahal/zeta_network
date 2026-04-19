@@ -29,9 +29,9 @@ pub const MAX_PACKET_SIZE: usize = 65536;
 pub struct Headers {
     pub msg_id:   u64,
     pub src_addr: SocketAddr,
-    pub src_id:   String,
+    pub src_username:   String,
     pub dst_addr: SocketAddr,
-    pub dst_id:   String,
+    pub dst_username:   String,
     pub time:     u64,
     pub signature: Vec<u8>,
 }
@@ -103,8 +103,8 @@ impl fmt::Display for Headers {
         write!(
             f,
             "{} ({}) -> {} ({}) (#{} - {})",
-            self.src_addr, self.src_id,
-            self.dst_addr, self.dst_id,
+            self.src_addr, self.src_username,
+            self.dst_addr, self.dst_username,
             self.msg_id,
             fmt_time(self.time)
         )

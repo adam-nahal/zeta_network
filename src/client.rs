@@ -102,7 +102,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		                .or_insert(PeerInfo {
 		                	id: peer_id_from_verifying_key(verifying_key),
 						    addr: msg_rcv.headers.src_addr,
-						    username: msg_rcv.headers.src_id.clone(),
+						    username: msg_rcv.headers.src_username.clone(),
 						    last_seen: now_secs(),
 						    is_relay: false,
 						    verifying_key: *verifying_key
@@ -112,9 +112,9 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 			            headers: Headers {
 			                msg_id:   new_msg_id(),
 			                src_addr: public_addr,
-			                src_id:   peer_id.clone(),
+			                src_username:   peer_id.clone(),
 			                dst_addr: msg_rcv.headers.src_addr,
-			                dst_id:   msg_rcv.headers.src_id.clone(),
+			                dst_username:   msg_rcv.headers.src_username.clone(),
 			                time:     now_secs(),
 							signature: vec![], 
 			            },
@@ -140,7 +140,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		                let _ = socket.send_msg(msg_rcv.clone(), msg_rcv.headers.dst_addr, &logs).await;
 		                println!("Sent to {}: '{}'", msg_rcv.headers.dst_addr, msg_rcv);
 		            } else {
-		                eprintln!("Peer {} ({}) is unknown", msg_rcv.headers.dst_addr, msg_rcv.headers.dst_id);
+		                eprintln!("Peer {} ({}) is unknown", msg_rcv.headers.dst_addr, msg_rcv.headers.dst_username);
 		            }
 		        }
 
@@ -150,9 +150,9 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		            	headers: Headers {
 	            			msg_id: new_msg_id(),
 			                src_addr: public_addr,
-			                src_id: peer_id.clone(),
+			                src_username: peer_id.clone(),
 			                dst_addr: *peer_addr,
-			                dst_id: client_id.to_string(),
+			                dst_username: client_id.to_string(),
 			                time: now_secs(),
 							signature: vec![], 
 		            	},
@@ -172,9 +172,9 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		                	headers: Headers {
 	            				msg_id: new_msg_id(),
 				                src_addr: public_addr,
-				                src_id: peer_id.clone(),
+				                src_username: peer_id.clone(),
 				                dst_addr: msg_rcv.headers.src_addr,
-				                dst_id: msg_rcv.headers.src_id.clone(),
+				                dst_username: msg_rcv.headers.src_username.clone(),
 				                time: now_secs(),
 								signature: vec![], 
 		                	},
@@ -198,9 +198,9 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
     	headers: Headers {
             msg_id: new_msg_id(),
 	        src_addr: public_addr,
-	        src_id: peer_id.clone(),
+	        src_username: peer_id.clone(),
 	        dst_addr: hub_relay_addr,
-	        dst_id: "hub".to_string(),
+	        dst_username: "hub".to_string(),
 	        time: now_secs(),
 			signature: vec![], 
 	    },
@@ -247,9 +247,9 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 		                	headers: Headers {
 	            				msg_id: new_msg_id(),
 			                    src_addr: public_addr,
-			                    src_id: peer_id.clone(),
+			                    src_username: peer_id.clone(),
 			                    dst_addr: "0.0.0.0:0".parse().unwrap(),
-			                    dst_id: "all".to_string(),
+			                    dst_username: "all".to_string(),
 			                    time: now_secs(),
 								signature: vec![], 
 		                	},

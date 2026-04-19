@@ -76,7 +76,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 					.and_modify(|peer_info| peer_info.last_seen = now_secs())
 					.or_insert(PeerInfo {
 					    id: peer_id_from_verifying_key(verifying_key),
-						username: msg_rcv.headers.src_id.clone(),
+						username: msg_rcv.headers.src_username.clone(),
 					    addr: msg_rcv.headers.src_addr,
 					    last_seen: now_secs(),
 					    is_relay: true,
@@ -88,9 +88,9 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 					headers: Headers {
 						msg_id: new_msg_id(),
 						src_addr: public_addr,
-						src_id: peer_id.clone(),
+						src_username: peer_id.clone(),
 						dst_addr: msg_rcv.headers.src_addr,
-						dst_id: msg_rcv.headers.src_id.clone(),
+						dst_username: msg_rcv.headers.src_username.clone(),
 						time: now_secs(),
 						signature: vec![],         		
 					},
@@ -115,13 +115,13 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 						headers: Headers {
 							msg_id: new_msg_id(),
 							src_addr: public_addr,
-							src_id: "hub".to_string(),
+							src_username: "hub".to_string(),
 							dst_addr: relay_info.addr,
-							dst_id: relay_info.username.clone(),
+							dst_username: relay_info.username.clone(),
 							time: now_secs(),
 							signature: vec![], 
 						},
-						payload: Payload::RelayHasNewClient { peer_addr: msg_rcv.headers.src_addr, peer_id: msg_rcv.headers.src_id.clone()},
+						payload: Payload::RelayHasNewClient { peer_addr: msg_rcv.headers.src_addr, peer_id: msg_rcv.headers.src_username.clone()},
 						last_hop: public_addr,
 					};
 					let _ = msg.sign(&auth_keys.signing_key);
@@ -132,9 +132,9 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 						headers: Headers {
 							msg_id: new_msg_id(),
 							src_addr: public_addr,
-							src_id: "hub".to_string(),
+							src_username: "hub".to_string(),
 							dst_addr: msg_rcv.headers.src_addr,
-							dst_id: msg_rcv.headers.src_id.clone(),
+							dst_username: msg_rcv.headers.src_username.clone(),
 							time: now_secs(),
 							signature: vec![], 
 						},
@@ -149,9 +149,9 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 						headers: Headers {
 							msg_id: new_msg_id(),
 							src_addr: public_addr,
-							src_id: "hub".to_string(),
+							src_username: "hub".to_string(),
 							dst_addr: msg_rcv.headers.src_addr,
-							dst_id: msg_rcv.headers.src_id.clone(),
+							dst_username: msg_rcv.headers.src_username.clone(),
 							time: now_secs(),
 							signature: vec![], 
 						},

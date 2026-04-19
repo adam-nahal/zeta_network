@@ -41,9 +41,9 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
             headers: Headers {
                 msg_id: new_msg_id(),
                 src_addr: public_addr,
-                src_id: peer_id.to_string(),
+                src_username: peer_id.to_string(),
                 dst_addr: hub_relay_addr,
-                dst_id: "hub".to_string(),
+                dst_username: "hub".to_string(),
                 time: now_secs(),
                 signature: vec![],
             },
@@ -74,9 +74,9 @@ pub async fn connect_to_a_relay(socket: &UdpSocket, public_addr: SocketAddr, pee
         headers: Headers {
             msg_id: new_msg_id(),
             src_addr: public_addr,
-            src_id: peer_id.to_string(),
+            src_username: peer_id.to_string(),
             dst_addr: relay_addr,
-            dst_id: relay_id.clone(),
+            dst_username: relay_id.clone(),
             time: now_secs(),
             signature: vec![],
         },
