@@ -24,7 +24,7 @@ pub async fn relay_message(peers: &PeersMap, relayer_addr: SocketAddr, mut msg: 
 
     msg.last_hop = relayer_addr;
     for (_, peer_info) in peers.iter() {
-        if peer_info.addr != relayer_addr {
+        if peer_info.addr != msg.headers.src_addr {
             if let Err(e) = socket.send_msg(msg.clone(), peer_info.addr, logs).await {
                 eprintln!("Failed to send to {}: {}", peer_info.addr, e);
             } else {
