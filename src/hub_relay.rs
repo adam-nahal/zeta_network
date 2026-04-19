@@ -39,6 +39,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 	        	if logs.len() > 10_000 {
 				    logs.drain(0..1000);
 				}
+				drop(logs);
 	            sleep(Duration::from_secs(10)).await;
 	        }
 	    }
