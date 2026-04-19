@@ -77,7 +77,7 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	    let db = db.clone();
 	    async move {
 	        loop {
-	            sleep(Duration::from_secs(5)).await;
+	            sleep(Duration::from_secs(20)).await;
 	            let _ = db.refresh_peers_in_db(&peers).await.expect("[ERROR] refresh_peers_in_db failed");
 	            let _ = db.refresh_logs_in_db(&logs).await.expect("[ERROR] refresh_logs_in_db failed");
 	        }
