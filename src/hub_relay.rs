@@ -51,7 +51,7 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 	    let db = db.clone();
 	    async move {
 	        loop {
-	            sleep(Duration::from_secs(5)).await;
+	            sleep(Duration::from_secs(20)).await;
 
 	            if let Err(e) = db.refresh_peers_in_db(&relays).await {
 				    eprintln!("[ERROR] refresh_peers_in_db failed: {}", e);
