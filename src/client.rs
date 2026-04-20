@@ -44,7 +44,8 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
 	let socket = Arc::new(socket);
 
 	// Création des clés d'authentification
-	let auth_keys: AuthKeys = AuthKeys::generate();
+	let auth_keys: AuthKeys = AuthKeys::load_or_generate("identity.key")
+		.expect("[ERROR] Failed to load or generate identity");
 
 	// Initialise la base de données et initialise le compteur msg_id
 	let db = DbManager::new("client.db").await.expect("Cannot open the database");

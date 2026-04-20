@@ -18,7 +18,8 @@ pub async fn main_hub_relay(peer_id: String, hub_relay_addr: SocketAddr) {
 	}
 
 	// Création des clés d'authentification
-	let auth_keys: AuthKeys = AuthKeys::generate();
+	let auth_keys: AuthKeys = AuthKeys::load_or_generate("identity.key")
+		.expect("[ERROR] Failed to load or generate identity");
 
 	// Initialise la base de données et initialise le compteur msg_id
 	let db = DbManager::new("hub_relay.db").await.expect("Cannot open the database");

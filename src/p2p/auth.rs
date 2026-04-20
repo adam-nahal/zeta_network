@@ -1,5 +1,7 @@
 use ed25519_dalek::{SigningKey, VerifyingKey, Signature, Signer, Verifier};
 use sha2::{Sha256, Digest};
+use std::path::Path;
+use std::fs;
 
 use crate::types::*;
 
@@ -16,6 +18,34 @@ impl AuthKeys {
         let signing_key = SigningKey::generate(&mut csprng);
         let verifying_key = signing_key.verifying_key();
         Self { signing_key, verifying_key }
+    }
+
+    pub fn save(&self, path: &str) -> anyhow::Result<()> {
+        let hex = hex::encode(self.signing_key.as_bytes());
+        fs::write(path, hex)?;
+        Ok(())
+    }
+
+    pub fn load(path: &str) -> anyhow::Result<Self> {
+        let hex = fs::read_to_string(path)?;
+        let bytes = hex::decode(hex.trim())?;
+        let bytes: [u8; 32] = bytes.try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid key length"))?;
+        let signing_key = SigningKey::from_bytes(&bytes);
+        let verifying_key = signing_key.verifying_key();
+        Ok(Self { signing_key, verifying_key })
+    }
+
+    pub fn load_or_generate(path: &str) -> anyhow::Result<Self> {
+        if Path::new(path).exists() {
+            println!("Loading existing identity from '{}'", path);
+            Self::load(path)
+        } else {
+            println!("Generating new identity, saving to '{}'", path);
+            let keys = Self::generate();
+            keys.save(path)?;
+            Ok(keys)
+        }
     }
 }
 
