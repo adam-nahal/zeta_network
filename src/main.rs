@@ -5,6 +5,7 @@ mod nat_detector;
 mod p2p;
 mod hub_relay;
 mod db;
+mod lightning;
 
 use crate::p2p::*;
 
