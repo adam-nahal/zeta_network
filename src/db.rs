@@ -24,7 +24,7 @@ impl DbManager {
                 username TEXT NOT NULL,
                 last_seen INTEGER NOT NULL,
                 is_relay INTEGER NOT NULL,
-                verifying_key BLOB NOT NULL
+                verifying_key TEXT NOT NULL
             )",
             [],
         )?;
@@ -39,7 +39,8 @@ impl DbManager {
                 msg_type TEXT NOT NULL,
                 payload TEXT,
                 last_hop TEXT NOT NULL,
-                signature BLOB PRIMARY KEY
+                signature TEXT NOT NULL,
+                UNIQUE(msg_id, src_addr, src_username)
             )",
             [],
         )?;
@@ -56,13 +57,16 @@ impl DbManager {
 	    let mut rows = stmt.query([])?;
 	    let peers = Arc::new(Mutex::new(HashMap::new()));
 	    while let Some(row) = rows.next()? {
-	        let id: Vec<u8> = row.get(0)?;
+	        let id: String = row.get(0)?;
 	        let addr: SocketAddr = row.get::<_, String>(1)?.parse()
 	        	.expect("[ERROR] Badly formated addr in db");
-	        let verifying_key: [u8; 32] = row.get::<_, Vec<u8>>(5)?.try_into()
-	        	.expect("[ERROR] Badly formated verifying_key in db");
-	        let verifying_key: VerifyingKey = VerifyingKey::from_bytes(&verifying_key)
-	        	.expect("[ERROR] Badly formated verifying_key in db");
+
+	        let vk_hex: String = row.get(5)?;
+	        let vk_bytes: [u8; 32] = hex::decode(&vk_hex)
+	            .expect("Invalid hex for verifying_key")
+	            .try_into().expect("Not 32 bytes");
+	        let verifying_key = VerifyingKey::from_bytes(&vk_bytes)
+	            .expect("Invalid verifying_key in db");
 
 	        peers.lock().await.insert(id.clone(), PeerInfo {
 	        	id,
@@ -94,7 +98,7 @@ impl DbManager {
 	            ("PeerInfo", Some(peer_info))          => {
 	                let mut parts = peer_info.splitn(6, '|');
 	                Payload::PeerInfo { peer_info: PeerInfo {
-	                	id: parts.next().expect("Wrong id in db").as_bytes().to_vec(),
+	                	id: parts.next().expect("Wrong id in db").to_string(),
 	                	addr: parts.next().expect("Wrong addr in db").parse().expect("Wrong addr in db"), 
 	                	username: parts.next().expect("Wrong addr in db").to_string(),
 	                	last_seen: parts.next().expect("Wrong last_seen in db").parse().expect("Wrong last_seen in db"),
@@ -144,7 +148,7 @@ impl DbManager {
 	                src_username:   row.get(3)?,
 	                dst_addr: row.get::<_, String>(4)?.parse().map_err(|_| rusqlite::Error::InvalidColumnType(4, "SocketAddr".into(), rusqlite::types::Type::Text))?,
 	                dst_username:   row.get(5)?,
-	                signature: row.get(9)?,
+	                signature: hex::decode(row.get::<_, String>(9)?).unwrap_or_default(),
 	            },
 	            payload,
 	            last_hop: row.get::<_, String>(8)?.parse().map_err(|_| rusqlite::Error::InvalidColumnType(4, "SocketAddr".into(), rusqlite::types::Type::Text))?,
@@ -169,7 +173,14 @@ impl DbManager {
 		                 id = excluded.id,
 		                 last_seen = excluded.last_seen,
 		                 is_relay = excluded.is_relay",
-		            params![id, peer_info.addr.to_string(), peer_info.username, peer_info.last_seen, peer_info.is_relay, peer_info.verifying_key.as_bytes().to_vec()],
+		            params![
+		            	id, 
+		            	peer_info.addr.to_string(), 
+		            	peer_info.username, 
+		            	peer_info.last_seen, 
+		            	peer_info.is_relay, 
+		            	hex::encode(peer_info.verifying_key.as_bytes())
+		            ],
 		        )?;
 		    }
 
@@ -231,7 +242,7 @@ impl DbManager {
 		                msg_type.to_string(),
 		                payload,
 		                log.last_hop.to_string(),
-		                log.headers.signature,
+		                hex::encode(&log.headers.signature),
 		            ],
 		        )?;
 		    }

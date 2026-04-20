@@ -9,7 +9,7 @@ use ed25519_dalek::VerifyingKey;
 use crate::p2p::utils::*;
 
 
-pub type PeerId = Vec<u8>;
+pub type PeerId = String;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PeerInfo {

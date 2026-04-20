@@ -60,9 +60,7 @@ impl Message {
 }
 
 pub fn peer_id_from_verifying_key(verifying_key: &VerifyingKey) -> PeerId {
-    let key_bytes = verifying_key.to_bytes();
-    let hash = Sha256::digest(&key_bytes);
-    hash.to_vec() // conversion en Vec<u8>
+	hex::encode(Sha256::digest(verifying_key.to_bytes()))
 }
 
 pub async fn get_verifying_key(peers: PeersMap, username: String) -> Option<VerifyingKey> {
