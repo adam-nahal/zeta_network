@@ -30,7 +30,7 @@ lightning-background-processor = "0.0.124"
 
 # Bitcoin
 bitcoin = "0.31"
-bdk = { version = "1.0", features = ["esplora-reqwest"] }  # wallet + broadcast
+bdk = "0.30.2" # wallet + broadcast
 
 # Autres
 esplora-client = "0.7"
