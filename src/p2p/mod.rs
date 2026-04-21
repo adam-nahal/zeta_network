@@ -24,7 +24,7 @@ pub struct Opts {
 pub enum Mode {
     Client {
         #[arg(long)]
-        peer_id: String,
+        username: String,
     },
     HubRelay,
 }

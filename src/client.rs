@@ -65,8 +65,8 @@ pub async fn user_and_relay(socket: UdpSocket, public_addr: SocketAddr, peer_id:
     	let peers = Arc::clone(&peers);
     	async move {
 	        loop {
-	            sleep(Duration::from_secs(10)).await;
 	            delete_disconnected_peers(&peers).await;
+	            sleep(Duration::from_secs(10)).await;
 	        }
 	    }
     });

@@ -17,7 +17,7 @@ async fn main() {
     let opts = Opts::parse();
 
     match opts.mode {
-        Mode::Client { peer_id } => client::main_client(peer_id, hub_relay_addr).await,
+        Mode::Client { username } => client::main_client(username, hub_relay_addr).await,
         Mode::HubRelay => hub_relay::main_hub_relay("hub".to_string(), hub_relay_addr).await,
     }
     
