@@ -22,6 +22,7 @@ ed25519-dalek = { version = "2.2.0", features = ["rand_core", "serde"] }
 hex = "0.4.3"
 sha2 = "0.11.0"
 
-# Lightning
+# Lightning + Bitcoin
 lightning = "0.1"
+bitcoin = { version = "0.31", features = ["secp-recovery"] }
 
