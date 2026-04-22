@@ -8,7 +8,7 @@ mod db;
 mod lightning;
 
 use crate::p2p::*;
-
+//use crate::lightning::keys::LdkKeysManager;
 
 #[tokio::main]
 async fn main() {
@@ -21,6 +21,10 @@ async fn main() {
         Mode::Client { username } => client::main_client(username, hub_relay_addr).await,
         Mode::HubRelay => hub_relay::main_hub_relay("hub".to_string(), hub_relay_addr).await,
     }
+    
+    //Futur test
+    //let km = LdkKeysManager::load("identity.key").unwrap();
+    //println!("LN node_id = {}", km.node_id_hex());
     
     println!("\nSee you soon!");
 }
