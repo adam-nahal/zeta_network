@@ -58,6 +58,11 @@ pub struct Message {
     pub last_hop: SocketAddr,
 }
 
+// pub struct MessageStored {
+// 	pub msg: Message,
+// 	pub in_out: InOut,
+// }
+
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.payload {
